@@ -11,6 +11,8 @@ import * as StageComplete from '../stages/complete.js'
 import * as StageBookkeeping from '../stages/bookkeeping.js'
 import * as StageReport from '../stages/report.js'
 import * as StageSettings from '../stages/settings.js'
+import * as StageAIAssistant from '../stages/ai-assistant.js'
+import * as StageSocialMedia from '../stages/social-media.js'
 
 const navItems = [
   { key: 'dashboard', label: 'Dashboard', module: StageDashboard, icon: '🏠' },
@@ -20,6 +22,8 @@ const navItems = [
   { key: 'complete', label: 'Penyelesaian', module: StageComplete, icon: '✅' },
   { key: 'bookkeeping', label: 'Pembukuan', module: StageBookkeeping, icon: '📊' },
   { key: 'report', label: 'Laporan', module: StageReport, icon: '📈' },
+  { key: 'social-media', label: 'Social Media', module: StageSocialMedia, icon: '📱' },
+  { key: 'ai-assistant', label: 'AI Superpowers', module: StageAIAssistant, icon: '🦸' },
 ]
 
 let currentUser = null
@@ -135,6 +139,16 @@ function renderLogin() {
   })
 
   container.appendChild(form)
+
+  // Back to landing page link
+  const backLink = Components.el('a', {
+    href: '/landing.html',
+    style: 'display:block;text-align:center;margin-top:18px;color:var(--text-muted);font-size:0.85rem;text-decoration:none;transition:color 0.2s;',
+    onmouseenter: (e) => { e.target.style.color = 'var(--primary)' },
+    onmouseleave: (e) => { e.target.style.color = 'var(--text-muted)' },
+  }, '← Kembali ke Halaman Utama')
+  container.appendChild(backLink)
+
   return container
 }
 
@@ -177,13 +191,14 @@ function renderDashboard() {
   })
   sidebar.appendChild(navList)
 
-  // Bottom of sidebar — prototype badge
-  if (isMock) {
-    sidebar.appendChild(Components.el('div', { className: 'sidebar-footer' },
-      Components.el('span', { style: 'font-size:0.75rem;color:var(--text-muted);' }, 'Mode Prototype'),
-      Components.el('span', { style: 'font-size:0.7rem;color:var(--text-dim);display:block;' }, 'Data lokal di browser')
-    ))
-  }
+  // Bottom of sidebar — member badge + prototype badge
+  sidebar.appendChild(Components.el('div', { className: 'sidebar-footer' },
+    Components.el('div', { style: 'display:flex;align-items:center;justify-content:center;gap:6px;margin-bottom:6px;' },
+      Components.el('span', { style: 'width:6px;height:6px;background:var(--success);border-radius:50%;display:inline-block;' }),
+      Components.el('span', { style: 'font-size:0.75rem;color:var(--text-muted);font-weight:600;' }, 'Eksklusif Member')
+    ),
+    isMock ? Components.el('span', { style: 'font-size:0.7rem;color:var(--text-dim);display:block;' }, 'Mode Prototype — Data lokal') : ''
+  ))
 
   // Content area
   const content = Components.el('main', { className: 'app-content' })
