@@ -16,6 +16,7 @@ requests:
   customer_name TEXT NOT NULL
   service_type TEXT NOT NULL
   location TEXT
+  phone TEXT
   description TEXT
   status TEXT NOT NULL DEFAULT 'draft'
   created_at TIMESTAMPTZ NOT NULL DEFAULT now()
@@ -70,11 +71,12 @@ reports:
   created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 */
 
-export function createRequest(input) {
+export function createRequest(input = {}) {
   return {
     customer_name: input.customer_name?.trim() ?? '',
     service_type: input.service_type?.trim() ?? '',
     location: input.location?.trim() ?? '',
+    phone: input.phone?.trim() ?? '',
     description: input.description?.trim() ?? '',
     status: ServiceStatus.REQUEST.DRAFT,
   }

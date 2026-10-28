@@ -7,18 +7,23 @@
   "author": "Your Name",
   "license": "MIT",
   "scripts": {
+    "predev": "node scripts/setup.js",
     "dev": "vite",
+    "prebuild": "node scripts/setup.js",
     "build": "vite build",
     "preview": "vite preview",
     "setup": "node scripts/setup.js",
     "lint": "echo 'Linting not configured yet'",
-    "test": "echo 'Tests not configured yet'"
+    "test": "vitest run",
+    "test:watch": "vitest"
   },
   "dependencies": {
     "@tencent-ai/workbuddy-cloud-sdk": "dev"
   },
   "devDependencies": {
-    "vite": "^5.4.0"
+    "jsdom": "^25.0.1",
+    "vite": "^5.4.0",
+    "vitest": "^2.1.9"
   },
   "engines": {
     "node": ">=18.0.0"

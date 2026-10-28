@@ -28,6 +28,45 @@ function persist() {
 let _session = null
 let _sessionCb = null
 
+/* ---------- Evaluasi filter (dipakai select, update, dan delete) ---------- */
+
+function parseOrExpr(expr) {
+  return String(expr)
+    .split(',')
+    .map((part) => part.trim())
+    .filter(Boolean)
+    .map((part) => {
+      const [col, op, ...rest] = part.split('.')
+      const raw = rest.join('.')
+      const val = raw === 'null' ? null
+        : raw !== '' && !Number.isNaN(Number(raw)) ? Number(raw)
+        : raw
+      return { op, col, val }
+    })
+}
+
+function matchFilter(row, f) {
+  switch (f.op) {
+    case 'eq': return row[f.col] == f.val
+    case 'neq': return row[f.col] != f.val
+    case 'gt': return row[f.col] > f.val
+    case 'gte': return row[f.col] >= f.val
+    case 'lt': return row[f.col] < f.val
+    case 'lte': return row[f.col] <= f.val
+    case 'like': return String(row[f.col] ?? '').includes(String(f.val).replace(/%/g, ''))
+    case 'ilike': return String(row[f.col] ?? '').toLowerCase().includes(String(f.val).replace(/%/g, '').toLowerCase())
+    case 'is': return row[f.col] === f.val
+    case 'in': return f.val.includes(row[f.col])
+    case 'match': return Object.entries(f.val).every(([k, v]) => row[k] == v)
+    case 'or': return parseOrExpr(f.val).some((sub) => matchFilter(row, sub))
+    default: return true
+  }
+}
+
+function rowMatchesAll(row, filters) {
+  return filters.every((f) => matchFilter(row, f))
+}
+
 function notifyAuth(event) {
   if (_sessionCb) _sessionCb(event, _session)
 }
@@ -126,27 +165,8 @@ const mockDatabase = {
       maybeSingle() { builder._maybeSingle = true; return builder },
 
       async then(resolve) {
-        let rows = [...ensureTable(table)]
-        if (!_session) {
-          // prototype: tanpa auth tetap bisa CRUD dengan owner_id kosong
-        }
-        for (const f of filters) {
-          rows = rows.filter(r => {
-            if (f.op === 'eq') return r[f.col] == f.val
-            if (f.op === 'neq') return r[f.col] != f.val
-            if (f.op === 'gt') return r[f.col] > f.val
-            if (f.op === 'gte') return r[f.col] >= f.val
-            if (f.op === 'lt') return r[f.col] < f.val
-            if (f.op === 'lte') return r[f.col] <= f.val
-            if (f.op === 'like') return String(r[f.col] ?? '').includes(f.val.replace(/%/g, ''))
-            if (f.op === 'ilike') return String(r[f.col] ?? '').toLowerCase().includes(f.val.replace(/%/g, '').toLowerCase())
-            if (f.op === 'is') return r[f.col] === f.val
-            if (f.op === 'in') return f.val.includes(r[f.col])
-            if (f.op === 'match') return Object.entries(f.val).every(([k, v]) => r[k] == v)
-            if (f.op === 'or') return true // simplified
-            return true
-          })
-        }
+        // prototype: tanpa auth tetap bisa CRUD dengan owner_id kosong
+        let rows = ensureTable(table).filter((r) => rowMatchesAll(r, filters))
         if (builder._order) {
           rows.sort((a, b) => {
             const av = a[builder._order.col], bv = b[builder._order.col]
@@ -198,11 +218,8 @@ const mockDatabase = {
       }
       if (builder._update) {
         let affected = 0
-        ensureTable(table).forEach((row, i) => {
-          if (filters.every(f => {
-            if (f.op === 'eq') return row[f.col] == f.val
-            return true
-          })) {
+        ensureTable(table).forEach((row) => {
+          if (rowMatchesAll(row, filters)) {
             Object.assign(row, builder._update)
             affected++
           }
@@ -211,8 +228,7 @@ const mockDatabase = {
         return resolve({ data: affected > 0 ? [builder._update] : [], error: null })
       }
       if (builder._delete) {
-        const before = ensureTable(table).length
-        _state[table] = ensureTable(table).filter(row => !filters.every(f => row[f.col] == f.val))
+        _state[table] = ensureTable(table).filter((row) => !rowMatchesAll(row, filters))
         persist()
         return resolve({ data: [], error: null })
       }
@@ -320,7 +336,7 @@ const mockLLM = {
  * Seed realistic demo data for teammate demonstration
  */
 export function seedDemoData() {
-  const state = loadState()
+  const state = _state
   if (state._seeded) return
 
   const now = new Date()
@@ -385,7 +401,7 @@ export function seedDemoData() {
 
   state.users = [{ id: 'demo-user', email: 'demo@satualur.id', name: 'Demo User', created_at: daysAgo(30) }]
   state._seeded = true
-  saveState(state)
+  persist()
   console.log('[Mock Cloud] Demo data seeded: 8 requests, 7 offers, 6 assignments, 4 completions, 12 ledger entries')
 }
 

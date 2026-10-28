@@ -2,6 +2,7 @@ import { getCloud } from '../cloud.js'
 import * as Components from '../ui/components.js'
 import { generateOffer } from '../ai/agent.js'
 import { validateOffer } from '../domain/rules.js'
+import { createOffer } from '../domain/models.js'
 import { loadModels, pickDefaultModel } from '../ai/models.js'
 import { showToast, animateEntrance } from '../ui/animations.js'
 
@@ -135,13 +136,9 @@ export async function render(container) {
       saveBtn.addEventListener('click', async () => {
         try {
           const cloud = getCloud()
-          const { error } = await cloud.database.from('offers').insert({
-            request_id: request.id,
-            ai_proposal_json: offerJson,
-            validated_price: offerJson.price,
-            validated_scope: offerJson.scope,
-            status: 'draft',
-          })
+          const { error } = await cloud.database.from('offers').insert(
+            createOffer(request.id, offerJson, offerJson.price, offerJson.scope)
+          )
           if (error) throw new Error(error.message)
           msg.className = 'form-message success'
           msg.textContent = '✅ Penawaran berhasil disimpan ke database.'

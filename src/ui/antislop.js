@@ -400,15 +400,15 @@ export function injectAntiSlopStyles() {
    ========================================================= */
 
 export function enableDevAudit(intervalMs = 5000) {
-  if (typeof window === 'undefined') return
+  if (typeof window === 'undefined') return () => {}
   if (window.location.hostname !== 'localhost' && !window.location.hostname.includes('127.0.0.1')) {
     console.log('[AntiSlop] Dev audit dinonaktifkan di non-localhost')
-    return
+    return () => {}
   }
 
   injectAntiSlopStyles()
 
-  setInterval(() => {
+  const intervalId = setInterval(() => {
     ANTI_PATTERNS.detect()
   }, intervalMs)
 
@@ -419,6 +419,12 @@ export function enableDevAudit(intervalMs = 5000) {
   observer.observe(document.body, { childList: true, subtree: true })
 
   console.log('[AntiSlop] Dev audit aktif — memeriksa UI setiap', intervalMs, 'ms')
+
+  return function stopDevAudit() {
+    clearInterval(intervalId)
+    observer.disconnect()
+    clearTimeout(window._antislopDebounce)
+  }
 }
 
 /* =========================================================

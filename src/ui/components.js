@@ -10,6 +10,7 @@ export function el(tag, attrs = {}, ...children) {
   Object.entries(attrs).forEach(([k, v]) => {
     if (k === 'className') node.className = v
     else if (k.startsWith('on') && typeof v === 'function') node.addEventListener(k.slice(2).toLowerCase(), v)
+    else if (k === 'htmlFor') node.setAttribute('for', v)
     else node.setAttribute(k, v)
   })
   children.forEach((c) => {

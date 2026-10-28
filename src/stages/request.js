@@ -1,4 +1,5 @@
 import { getCloud } from '../cloud.js'
+import { createRequest } from '../domain/models.js'
 import * as Components from '../ui/components.js'
 import { showToast, animateEntrance } from '../ui/animations.js'
 
@@ -60,7 +61,7 @@ export async function render(container) {
     e.preventDefault()
     msg.style.display = 'none'
     const fd = new FormData(form)
-    const data = Object.fromEntries(fd.entries())
+    const data = createRequest(Object.fromEntries(fd.entries()))
     try {
       const cloud = getCloud()
       const { error } = await cloud.database.from('requests').insert(data)
