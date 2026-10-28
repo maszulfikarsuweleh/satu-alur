@@ -270,16 +270,78 @@ async function* mockStreamOffer(request) {
   }
 }
 
+const idr = new Intl.NumberFormat('id-ID', { style: 'currency', currency: 'IDR', maximumFractionDigits: 0 })
+const rp = (n) => idr.format(Number(n) || 0)
+const pctFmt = (n) => `${Math.abs(n).toLocaleString('id-ID', { maximumFractionDigits: 1 })}%`
+const esc = (v) => String(v ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]))
+
+/** Compares cur with prev honestly: no percentage when prev is zero. */
+function compareLine(label, cur, prev, prevLabel, { lowerIsBetter = false } = {}) {
+  if (!(prev > 0)) return `${label} ${rp(cur)}; ${esc(prevLabel)} tidak punya ${label.toLowerCase()} sebagai pembanding.`
+  const pct = ((cur - prev) / prev) * 100
+  if (pct === 0) return `${label} sama dengan ${esc(prevLabel)} (${rp(prev)}).`
+  const dir = pct > 0 ? 'naik' : 'turun'
+  const good = lowerIsBetter ? pct < 0 : pct > 0
+  return `${label} ${dir} ${pctFmt(pct)} dibanding ${esc(prevLabel)} (${rp(prev)} → ${rp(cur)})${good ? '' : ' — perlu diperhatikan'}.`
+}
+
+/** Builds the mock explanation strictly from the report payload. */
+function explainHTML(report = {}) {
+  const rev = Number(report.total_revenue) || 0
+  const cost = Number(report.total_cost) || 0
+  const profit = Number(report.net_profit ?? rev - cost) || 0
+  const margin = report.margin_pct ?? (rev > 0 ? Math.round((profit / rev) * 1000) / 10 : null)
+  const entries = Array.isArray(report.entries) ? report.entries.length : 0
+  const cats = Array.isArray(report.by_category) ? report.by_category : []
+  const costCats = cats.filter((c) => c.category !== 'pendapatan').sort((a, b) => (b.amount || 0) - (a.amount || 0))
+  const custs = Array.isArray(report.top_customers) ? report.top_customers : []
+  const prev = report.previous_period
+
+  const out = []
+  out.push(`<h3>Ringkasan ${esc(report.period || 'periode terpilih')}</h3>`)
+  if (!entries && !rev && !cost) {
+    out.push('<p>Belum ada jurnal di periode ini, jadi belum ada angka yang bisa dijelaskan.</p>')
+    return out.join('\n')
+  }
+  out.push(`<p>Dari <strong>${entries} jurnal</strong>, pendapatan tercatat <strong>${rp(rev)}</strong> dan biaya <strong>${rp(cost)}</strong>, sehingga ${profit >= 0 ? 'laba' : 'rugi'} bersih <strong>${rp(Math.abs(profit))}</strong>${margin != null ? ` dengan margin <strong>${String(margin).replace('.', ',')}%</strong>` : ''}.</p>`)
+
+  if (prev) {
+    out.push('<h3>Dibanding periode sebelumnya</h3><ul>')
+    out.push(`<li>${compareLine('Pendapatan', rev, prev.total_revenue, prev.label)}</li>`)
+    out.push(`<li>${compareLine('Biaya', cost, prev.total_cost, prev.label, { lowerIsBetter: true })}</li>`)
+    out.push(`<li>Laba bersih ${esc(prev.label)}: ${rp(prev.net_profit)}; periode ini: ${rp(profit)}.</li>`)
+    out.push('</ul>')
+  } else {
+    out.push('<p>Periode ini tidak memiliki periode pembanding, jadi tidak ada tren yang disimpulkan.</p>')
+  }
+
+  if (costCats.length || custs.length) {
+    out.push('<h3>Rincian</h3><ul>')
+    if (costCats.length) {
+      const top = costCats[0]
+      const share = rev > 0 ? ` (${pctFmt(((top.amount || 0) / rev) * 100)} dari pendapatan)` : ''
+      out.push(`<li>Komponen biaya terbesar: <strong>${esc(top.label || top.category)}</strong> ${rp(top.amount)}${share}.</li>`)
+    }
+    if (custs.length) {
+      const c = custs[0]
+      const share = rev > 0 ? ` — ${pctFmt(((c.revenue || 0) / rev) * 100)} dari pendapatan` : ''
+      out.push(`<li>Pelanggan dengan pendapatan terbesar: <strong>${esc(c.name)}</strong>${c.service ? ` (${esc(c.service)})` : ''}, ${rp(c.revenue)}${share}.</li>`)
+    }
+    out.push('</ul>')
+  }
+
+  const recs = []
+  if (rev === 0 && cost > 0) recs.push('Ada biaya tanpa pendapatan di periode ini. Pastikan pendapatan dari pekerjaan selesai sudah diposting.')
+  if (margin != null && margin < 30) recs.push(`Margin ${String(margin).replace('.', ',')}% tergolong tipis. Tinjau harga penawaran atau tekan ${costCats[0] ? esc((costCats[0].label || '').toLowerCase()) : 'biaya'}.`)
+  if (margin != null && margin >= 30) recs.push('Margin sehat. Pertahankan struktur harga dan pantau biaya per pekerjaan.')
+  if (custs.length === 1 && rev > 0) recs.push('Seluruh pendapatan berasal dari satu pelanggan. Tambah pelanggan untuk mengurangi risiko konsentrasi.')
+  if (recs.length) out.push(`<h3>Rekomendasi</h3><ul>${recs.map((r) => `<li>${r}</li>`).join('')}</ul>`)
+  out.push('<p><small>Simulasi lokal: dihitung langsung dari data laporan di atas, bukan dari model AI.</small></p>')
+  return out.join('\n')
+}
+
 async function* mockStreamExplain(report) {
-  const html = `<h3>Laporan Periode ${report.period || 'Oktober 2026'}</h3>
-<p>Total pendapatan: <strong>Rp${(report.total_revenue || 0).toLocaleString('id-ID')}</strong>.</p>
-<p>Biaya operasional: <strong>Rp${(report.total_cost || 0).toLocaleString('id-ID')}</strong>.</p>
-<p>Laba bersih: <strong>Rp${((report.total_revenue || 0) - (report.total_cost || 0)).toLocaleString('id-ID')}</strong>.</p>
-<ul>
-  <li>Pendapatan naik 12% dibanding periode sebelumnya.</li>
-  <li>Biaya tenaga kerja merupakan komponen terbesar.</li>
-  <li>Rekomendasi: pertimbangkan paket langganan untuk meningkatkan recurring revenue.</li>
-</ul>`
+  const html = explainHTML(report)
   for (let i = 0; i < html.length; i += 8) {
     await new Promise(r => setTimeout(r, 20))
     yield {
@@ -295,22 +357,337 @@ async function* mockStreamExplain(report) {
   }
 }
 
+async function* mockStreamGeneral(userMsg) {
+  const responses = [
+    'Tentu! Satu Alur memiliki 6 tahap alur kerja yang terintegrasi: Permintaan → Penawaran AI → Penugasan → Penyelesaian → Pembukuan → Laporan. Setiap tahap terhubung secara otomatis.',
+    'Anda bisa melihat dashboard eksekutif di halaman awal setelah login. Dashboard menampilkan ringkasan KPI, aktivitas terbaru, dan status setiap tahap.',
+    'Fitur AI Penawaran akan secara otomatis menghasilkan proposal dengan estimasi harga berdasarkan deskripsi permintaan pelanggan. Harga dihitung realistis untuk pasar Indonesia.',
+    'Data Anda tersimpan dengan aman. Dalam mode produksi, kami menggunakan enkripsi end-to-end dan backup otomatis.',
+  ]
+  const text = responses[Math.floor(Math.random() * responses.length)]
+  for (let i = 0; i < text.length; i += 3) {
+    await new Promise(r => setTimeout(r, 25))
+    yield {
+      choices: [{
+        delta: { content: text.slice(i, i + 3) },
+        finish_reason: null,
+      }],
+    }
+  }
+  yield {
+    choices: [{ delta: {}, finish_reason: 'stop' }],
+    usage: { prompt_tokens: 20, completion_tokens: text.length / 3, total_tokens: 20 + text.length / 3 },
+  }
+}
+
+async function* mockStreamAnalyst(userMsg) {
+  const state = loadState()
+  const counts = {
+    requests: (state.requests || []).length,
+    offers: (state.offers || []).length,
+    assignments: (state.assignments || []).length,
+    completions: (state.completions || []).length,
+    ledger: (state.ledger_entries || []).length,
+  }
+  const text = `Berdasarkan data saat ini:\n\n• Total permintaan: ${counts.requests}\n• Total penawaran: ${counts.offers}\n• Total penugasan: ${counts.assignments}\n• Total penyelesaian: ${counts.completions}\n• Total jurnal: ${counts.ledger}\n\nTingkat konversi permintaan ke penawaran: ${counts.requests > 0 ? Math.round(counts.offers / counts.requests * 100) : 0}%.\nTingkat penyelesaian: ${counts.assignments > 0 ? Math.round(counts.completions / counts.assignments * 100) : 0}%.`
+  for (let i = 0; i < text.length; i += 3) {
+    await new Promise(r => setTimeout(r, 20))
+    yield {
+      choices: [{
+        delta: { content: text.slice(i, i + 3) },
+        finish_reason: null,
+      }],
+    }
+  }
+  yield {
+    choices: [{ delta: {}, finish_reason: 'stop' }],
+    usage: { prompt_tokens: 25, completion_tokens: text.length / 3, total_tokens: 25 + text.length / 3 },
+  }
+}
+
+async function* mockStreamSocial(userMsg) {
+  const isBrainstorm = userMsg.includes('brainstorm') || userMsg.includes('ide konten')
+  const isCaption = userMsg.includes('caption') || userMsg.includes('naskah')
+  const isImagePrompt = userMsg.includes('prompt gambar') || userMsg.includes('image generation')
+  const isAds = userMsg.includes('iklan') || userMsg.includes('Meta Ads')
+
+  let text = ''
+
+  if (isBrainstorm) {
+    text = `💡 **Brainstorm Ide Konten**
+
+**1. "Before vs After" Transformation**
+Format: Reels / TikTok
+Hook: "Lihat perbedaan AC ini sebelum dan sesudah dibersihkan!"
+Konsep: Video time-lapse proses pembersihan dengan musik upbeat.
+Estimasi engagement: 🔥 Tinggi
+
+**2. Tips & Educational Carousel**
+Format: Carousel Instagram
+Hook: "5 Tanda AC Anda Butuh Service Segera"
+Konsep: Infografis swipeable dengan icon dan bullet points.
+Estimasi engagement: 📈 Sedang-Tinggi
+
+**3. Behind the Scenes**
+Format: Story Series
+Hook: "Hari ini kita service AC di gedung 20 lantai!"
+Konsep: Dokumentasi tim bekerja dengan gondola/equipment.
+Estimasi engagement: 📊 Sedang
+
+**4. Customer Testimonial Video**
+Format: Short Video
+Hook: "Pak Surya bilang apa setelah sofa-nya bersih kembali?"
+Konsep: Interview singkat pelanggan puas.
+Estimasi engagement: 🔥 Tinggi
+
+**5. Myth Buster Series**
+Format: TikTok / Reels
+Hook: "Fakta atau Mitos: AC sering mati-sendiri karena hantu?"
+Konsep: Format Q&A dengan presenter enerjik.
+Estimasi engagement: 🔥 Tinggi
+
+Hashtag: #jasabersih #serviceac #cleaningservice #tipsrumah #jakarta`
+  } else if (isImagePrompt) {
+    text = `🎨 **AI Image Prompt**
+
+Prompt 1 (Hero Image):
+"Professional cleaning service team in orange uniform, modern minimalist living room, bright natural lighting, before-and-after split composition, photorealistic, 8K, commercial photography style"
+
+Prompt 2 (Instagram Feed):
+"Aerial view of sparkling clean swimming pool, tropical garden background, golden hour lighting, luxury villa setting, professional real estate photography, vivid colors"
+
+Prompt 3 (TikTok Thumbnail):
+"Split-screen dramatic transformation: dirty vs clean AC unit, bold text overlay space, high contrast, eye-catching colors, social media thumbnail style"
+
+Prompt 4 (Ad Banner):
+"Happy Indonesian family sitting on freshly cleaned sofa, bright modern home interior, warm lighting, lifestyle photography, copy space on right side, 16:9 aspect ratio"
+
+Tip: Tambahkan "--ar 1:1" untuk Instagram, "--ar 9:16" untuk Stories/Reels, "--ar 16:9" untuk banner.`
+  } else if (isAds) {
+    text = `🎯 **Rekomendasi Meta Ads**
+
+**Target Audience:**
+• Usia: 28-50 tahun
+• Gender: Semua
+• Lokasi: Jakarta Selatan, Jakarta Pusat, Depok, Tangerang
+• Minat: Home improvement, Property, Family & parenting, Cleaning services
+• Perilaku: Engaged shoppers, Recent home buyers
+
+**Placements:** Feed, Stories, Reels
+**Budget harian:** Rp100.000
+**Est. reach/hari:** ~200-350 orang
+**Est. CPM:** Rp450-750
+
+**Copy Iklan 1 (Promosi):**
+"AC Bocor? AC Bau? 🤢
+Tim kami siap datang HARI INI!
+✅ Pembersihan AC dari Rp85rb/unit
+✅ Garansi 7 hari
+✅ Free survey
+📍 Jakarta & sekitarnya
+👇 Klik WA langsung!"
+
+**Copy Iklan 2 (Testimonial):**
+""Sofa kami seperti baru lagi!" — Ibu Dian, Jakarta Selatan
+Cuci sofa mulai dari Rp350rb/set
+✅ Noda hilang 99%
+✅ Bahan aman & ramah anak
+📲 Hubungi kami sekarang!"
+
+**Waktu Posting Terbaik:**
+🕐 09:00–11:00 | 🕐 13:00–15:00 | 🕐 19:00–21:00
+
+Hashtag: #serviceacjakarta #jasabersih #homecare #cleaningserviceid #tipsrumah`
+  } else {
+    text = `📝 **Caption Instagram**
+
+✨ AC BERSIH = UDARA SEGAR ✨
+
+Siapa yang suka tidur dengan AC nyaman tanpa bau aneh? 🙋‍♀️
+
+Tahukah kamu? AC yang jarang dibersihkan bisa jadi sarang bakteri dan debu yang menyebabkan alergi! 😷
+
+Nggak usah khawatir, tim Satu Alur siap bantu:
+✅ Pembersihan AC split & central
+✅ Penggantian filter
+✅ Pengecekan freon
+✅ Garansi 7 hari
+
+📍 Jakarta, Depok, Tangerang, Bekasi
+💰 Mulai dari Rp85rb/unit
+
+Yuk booking sekarang! Link di bio 👆
+
+#serviceac #jasabersih #cleaningservice #tipsrumah #jakarta #depok #tangerang #homecare #acbersih #rumahsehat`
+  }
+
+  for (let i = 0; i < text.length; i += 4) {
+    await new Promise(r => setTimeout(r, 18))
+    yield {
+      choices: [{
+        delta: { content: text.slice(i, i + 4) },
+        finish_reason: null,
+      }],
+    }
+  }
+  yield {
+    choices: [{ delta: {}, finish_reason: 'stop' }],
+    usage: { prompt_tokens: 30, completion_tokens: text.length / 4, total_tokens: 30 + text.length / 4 },
+  }
+}
+
+async function* mockStreamPertumbuhan(userMsg) {
+  const lower = userMsg.toLowerCase()
+  let text = ''
+
+  if (lower.includes('hotel horizon') || lower.includes('penawaran')) {
+    text = `✅ **Tindakan: Kirim Penawaran ke Hotel Horizon**
+
+Saya telah menyiapkan draft penawaran:
+
+• **Layanan:** Daily cleaning kamar + lobby + common area
+• **Frekuensi:** 6 hari/minggu
+• **Tim:** 4 orang (2 cleaning, 1 supervisor, 1 backup)
+• **Harga:** Rp 54.000.000/bulan (all-in)
+• **Nilai tambah:** Free disinfection monthly + laporan foto harian
+
+**Probabilitas deal: 78%** → **Expected close dalam 3-5 hari**
+
+Langkah selanjutnya:
+1. Kirim email proposal (sudah saya draft)
+2. Follow-up WhatsApp dalam 24 jam
+3. Offer site visit gratis untuk survey
+
+Apakah Anda ingin saya kirim sekarang?`
+  } else if (lower.includes('maju jaya') || lower.includes('paket tahunan')) {
+    text = `💰 **Tindakan: Upsell Paket Tahunan PT Maju Jaya**
+
+Berdasarkan analisis riwayat:
+• Rata-rata order: Rp 350rb/bulan
+• Total 12 bulan: Rp 4.200.000
+• **Paket tahunan: Rp 3.360.000 (hemat 20%)**
+• **Bonus:** 2× free deep cleaning (Rp 700rb value)
+
+**Pitch rekomendasi:**
+"Pak Budi, dengan paket tahunan Anda hemat Rp 840rb + dapat 2× deep cleaning gratis. Saya lock harga ini sampai akhir bulan."
+
+**Prediksi keberhasilan: 82%**
+
+Ingin saya generate draft WhatsApp/Email?`
+  } else if (lower.includes('klinik') || lower.includes('retention')) {
+    text = `⚠️ **Tindakan: Retention Klinik Sehat Sentosa**
+
+Skenario churn terdeteksi:
+• Gap order: 45 hari (normal: 30 hari)
+• Last contact: 12 September
+• Competitor probability: 55%
+
+**Rekomendasi win-back sequence:**
+
+**Hari 1 (hari ini):** Telepon langsung ke manager operasional
+→ Tanyakan kebutuhan terbaru, offer audit kebersihan GRATIS
+
+**Hari 2:** Kirim voucher Rp 50rb untuk order berikutnya
+
+**Hari 5:** Follow-up email dengan portfolio hasil kerja terbaru
+
+**Win-back probability: 62%** → Jika tidak merespons dalam 7 hari, flag sebagai "lost customer"
+
+Mulai dengan telepon sekarang?`
+  } else if (lower.includes('bsd') || lower.includes('partnership')) {
+    text = `🤝 **Tindakan: Partnership BSD AC Service**
+
+Analisis partnership:
+• Overflow demand: 12 request/minggu (kapasitas penuh)
+• Partner track record: 4.8⭐, 200+ job
+• Margin bersih: 18%
+• Estimasi: 5 job/minggu pertama
+
+**Draft MOU:**
+• Periode: 3 bulan trial
+• Revenue share: 82% Anda, 18% partner
+• SLA: Response < 2 jam, selesai < 24 jam
+• Branding: Satu Alur tetap sebagai front-facing brand
+
+**Expected value: Rp 12 juta/bulan**
+
+Saya bisa generate draft MOU dan kontak BSD AC. Mulai?`
+  } else {
+    text = `🤖 **Asisten Pertumbuhan**
+
+Saya membantu Anda menemukan dan mengeksekusi peluang bisnis. Berikut yang bisa saya lakukan:
+
+• 📊 **Analisis peluang** — Scan data untuk hot lead, upsell, churn risk
+• 🎯 **Rekomendasi tindakan** — Suggest next step dengan probabilitas keberhasilan
+• 📞 **Generate draft komunikasi** — Email, WhatsApp, proposal untuk customer
+• 📈 **Tracking prediksi** — Monitor progress dan update probability real-time
+
+**6 peluang aktif terdeteksi dengan total potensi Rp 106.3 juta/bulan.**
+
+Apa yang ingin Anda tindaklanjuti?`
+  }
+
+  for (let i = 0; i < text.length; i += 3) {
+    await new Promise(r => setTimeout(r, 20))
+    yield {
+      choices: [{
+        delta: { content: text.slice(i, i + 3) },
+        finish_reason: null,
+      }],
+    }
+  }
+  yield {
+    choices: [{ delta: {}, finish_reason: 'stop' }],
+    usage: { prompt_tokens: 25, completion_tokens: text.length / 3, total_tokens: 25 + text.length / 3 },
+  }
+}
+
+function parseRequest(text) {
+  try { return JSON.parse(String(text).replace(/^Permintaan jasa:\s*/, '')) } catch { return { description: text } }
+}
+
+function parseReport(text) {
+  try { return JSON.parse(String(text).replace(/^Data laporan:\s*/, '')) } catch { return {} }
+}
+
 const mockLLM = {
   models: {
     async list() {
       return { data: [
-        { id: 'mock-gpt-4o', name: 'GPT-4o (Mock)', disabled: false, temperature: 0.7, supportsToolCall: false },
-        { id: 'mock-claude-3', name: 'Claude 3 (Mock)', disabled: false, temperature: 0.7 },
+        { id: 'mock-gpt-4o', name: 'GPT-4o (Mock)', disabled: false, temperature: 0.7, supportsToolCall: true, contextWindow: 128000 },
+        { id: 'mock-claude-3', name: 'Claude 3 (Mock)', disabled: false, temperature: 0.7, supportsToolCall: true, contextWindow: 200000 },
+        { id: 'mock-gpt-4o-mini', name: 'GPT-4o Mini (Mock)', disabled: false, temperature: 0.7, supportsToolCall: false, contextWindow: 128000 },
       ], error: null }
     }
   },
   chat: {
     completions: {
       create({ messages, stream, response_format }) {
-        const userMsg = messages.find(m => m.role === 'user')?.content || ''
-        const isOffer = userMsg.includes('Permintaan jasa')
-        const generator = isOffer ? mockStreamOffer(JSON.parse(userMsg.replace('Permintaan jasa:\n', ''))) : mockStreamExplain({})
-        return generator
+        const userMsg = [...messages].reverse().find(m => m.role === 'user')?.content || ''
+        const sysMsg = messages.find(m => m.role === 'system')?.content || ''
+        const isOffer = sysMsg.includes('agen penawaran') || userMsg.includes('Permintaan jasa')
+        const isReport = sysMsg.includes('analis laporan') || userMsg.includes('Data laporan')
+        const isAnalyst = sysMsg.includes('analis bisnis')
+        const isSocial = sysMsg.includes('social media') || sysMsg.includes('media sosial') || userMsg.includes('caption') || userMsg.includes('brainstorm') || userMsg.includes('hashtag') || userMsg.includes('iklan')
+        const isPertumbuhan = sysMsg.includes('pertumbuhan') || sysMsg.includes('business development')
+
+        // Choose appropriate mock response based on agent type
+        if (isOffer) {
+          return mockStreamOffer(parseRequest(userMsg))
+        }
+        if (isReport) {
+          return mockStreamExplain(parseReport(userMsg))
+        }
+        if (isSocial) {
+          return mockStreamSocial(userMsg)
+        }
+        if (isPertumbuhan) {
+          return mockStreamPertumbuhan(userMsg)
+        }
+        if (isAnalyst) {
+          return mockStreamAnalyst(userMsg)
+        }
+        return mockStreamGeneral(userMsg)
       }
     }
   }
@@ -390,8 +767,11 @@ export function seedDemoData() {
 }
 
 export function createMockWorkBuddyCloud() {
-  // Auto-seed on first creation
+  // Auto-seed on first creation, then re-read: the module-level copy was
+  // loaded before seeding and would otherwise overwrite the demo data on the
+  // next persist() (e.g. when the first login stores its user).
   seedDemoData()
+  _state = loadState()
 
   return {
     auth: mockAuth,
