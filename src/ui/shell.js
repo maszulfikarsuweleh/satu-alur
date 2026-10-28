@@ -20,6 +20,8 @@ import * as StageReport from '../stages/report.js'
 import * as StageSettings from '../stages/settings.js'
 import * as StageAIAssistant from '../stages/ai-assistant.js'
 import * as StageSocialMedia from '../stages/social-media.js'
+import * as StagePortfolio from '../stages/portfolio.js'
+import * as StagePertumbuhan from '../stages/pertumbuhan.js'
 
 export const STAGES = [
   { key: 'dashboard', num: '00', label: 'Ringkasan', icon: 'home', module: StageDashboard,
@@ -40,6 +42,10 @@ export const STAGES = [
     action: { label: 'Asisten AI', icon: 'bot', to: 'ai-assistant' } },
   { key: 'ai-assistant', label: 'AI Superpowers', icon: 'bot', module: StageAIAssistant,
     action: { label: 'Social Media', icon: 'message', to: 'social-media' } },
+  { key: 'portfolio', label: 'Industri & Portofolio', icon: 'building', module: StagePortfolio,
+    action: { label: 'Ringkasan', icon: 'home', to: 'dashboard' } },
+  { key: 'pertumbuhan', label: 'Pertumbuhan', icon: 'trendingUp', module: StagePertumbuhan,
+    action: { label: 'AI Superpowers', icon: 'bot', to: 'ai-assistant' } },
 ]
 
 const STAGE_KEY = 'satualur_stage'

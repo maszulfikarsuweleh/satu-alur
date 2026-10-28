@@ -271,6 +271,26 @@ Aturan:
     temperature: 0.8,
     tools: ['get_date', 'format_rupiah', 'count_database'],
   },
+  pertumbuhan: {
+    name: 'Asisten Pertumbuhan',
+    description: 'AI Business Development — temukan peluang dan tingkatkan keberhasilan bisnis',
+    systemPrompt: `Anda adalah AI Business Development untuk platform Satu Alur.
+Tugas Anda:
+1. **Deteksi Peluang**: Identifikasi hot lead, upsell, cross-sell, dan partnership dari data bisnis
+2. **Rekomendasi Tindakan**: Sarankan next step dengan probabilitas keberhasilan
+3. **Prediksi Keberhasilan**: Hitung success probability berdasarkan faktor-faktor bisnis
+4. **Generate Komunikasi**: Buat draft email, WhatsApp, proposal untuk customer
+5. **Retention Strategy**: Identifikasi churn risk dan buat win-back sequence
+
+Aturan:
+- Gunakan bahasa Indonesia profesional namun persuasif
+- Selalu sertakan estimasi ROI/profit
+- Berikan timeline yang realistis
+- Format Rupiah untuk semua angka keuangan
+- Jelaskan reasoning di balik setiap rekomendasi`,
+    temperature: 0.6,
+    tools: ['calculator', 'format_rupiah', 'count_database', 'get_date'],
+  },
 }
 
 export function getAgents() {

@@ -536,6 +536,112 @@ Yuk booking sekarang! Link di bio 👆
   }
 }
 
+async function* mockStreamPertumbuhan(userMsg) {
+  const lower = userMsg.toLowerCase()
+  let text = ''
+
+  if (lower.includes('hotel horizon') || lower.includes('penawaran')) {
+    text = `✅ **Tindakan: Kirim Penawaran ke Hotel Horizon**
+
+Saya telah menyiapkan draft penawaran:
+
+• **Layanan:** Daily cleaning kamar + lobby + common area
+• **Frekuensi:** 6 hari/minggu
+• **Tim:** 4 orang (2 cleaning, 1 supervisor, 1 backup)
+• **Harga:** Rp 54.000.000/bulan (all-in)
+• **Nilai tambah:** Free disinfection monthly + laporan foto harian
+
+**Probabilitas deal: 78%** → **Expected close dalam 3-5 hari**
+
+Langkah selanjutnya:
+1. Kirim email proposal (sudah saya draft)
+2. Follow-up WhatsApp dalam 24 jam
+3. Offer site visit gratis untuk survey
+
+Apakah Anda ingin saya kirim sekarang?`
+  } else if (lower.includes('maju jaya') || lower.includes('paket tahunan')) {
+    text = `💰 **Tindakan: Upsell Paket Tahunan PT Maju Jaya**
+
+Berdasarkan analisis riwayat:
+• Rata-rata order: Rp 350rb/bulan
+• Total 12 bulan: Rp 4.200.000
+• **Paket tahunan: Rp 3.360.000 (hemat 20%)**
+• **Bonus:** 2× free deep cleaning (Rp 700rb value)
+
+**Pitch rekomendasi:**
+"Pak Budi, dengan paket tahunan Anda hemat Rp 840rb + dapat 2× deep cleaning gratis. Saya lock harga ini sampai akhir bulan."
+
+**Prediksi keberhasilan: 82%**
+
+Ingin saya generate draft WhatsApp/Email?`
+  } else if (lower.includes('klinik') || lower.includes('retention')) {
+    text = `⚠️ **Tindakan: Retention Klinik Sehat Sentosa**
+
+Skenario churn terdeteksi:
+• Gap order: 45 hari (normal: 30 hari)
+• Last contact: 12 September
+• Competitor probability: 55%
+
+**Rekomendasi win-back sequence:**
+
+**Hari 1 (hari ini):** Telepon langsung ke manager operasional
+→ Tanyakan kebutuhan terbaru, offer audit kebersihan GRATIS
+
+**Hari 2:** Kirim voucher Rp 50rb untuk order berikutnya
+
+**Hari 5:** Follow-up email dengan portfolio hasil kerja terbaru
+
+**Win-back probability: 62%** → Jika tidak merespons dalam 7 hari, flag sebagai "lost customer"
+
+Mulai dengan telepon sekarang?`
+  } else if (lower.includes('bsd') || lower.includes('partnership')) {
+    text = `🤝 **Tindakan: Partnership BSD AC Service**
+
+Analisis partnership:
+• Overflow demand: 12 request/minggu (kapasitas penuh)
+• Partner track record: 4.8⭐, 200+ job
+• Margin bersih: 18%
+• Estimasi: 5 job/minggu pertama
+
+**Draft MOU:**
+• Periode: 3 bulan trial
+• Revenue share: 82% Anda, 18% partner
+• SLA: Response < 2 jam, selesai < 24 jam
+• Branding: Satu Alur tetap sebagai front-facing brand
+
+**Expected value: Rp 12 juta/bulan**
+
+Saya bisa generate draft MOU dan kontak BSD AC. Mulai?`
+  } else {
+    text = `🤖 **Asisten Pertumbuhan**
+
+Saya membantu Anda menemukan dan mengeksekusi peluang bisnis. Berikut yang bisa saya lakukan:
+
+• 📊 **Analisis peluang** — Scan data untuk hot lead, upsell, churn risk
+• 🎯 **Rekomendasi tindakan** — Suggest next step dengan probabilitas keberhasilan
+• 📞 **Generate draft komunikasi** — Email, WhatsApp, proposal untuk customer
+• 📈 **Tracking prediksi** — Monitor progress dan update probability real-time
+
+**6 peluang aktif terdeteksi dengan total potensi Rp 106.3 juta/bulan.**
+
+Apa yang ingin Anda tindaklanjuti?`
+  }
+
+  for (let i = 0; i < text.length; i += 3) {
+    await new Promise(r => setTimeout(r, 20))
+    yield {
+      choices: [{
+        delta: { content: text.slice(i, i + 3) },
+        finish_reason: null,
+      }],
+    }
+  }
+  yield {
+    choices: [{ delta: {}, finish_reason: 'stop' }],
+    usage: { prompt_tokens: 25, completion_tokens: text.length / 3, total_tokens: 25 + text.length / 3 },
+  }
+}
+
 function parseRequest(text) {
   try { return JSON.parse(String(text).replace(/^Permintaan jasa:\s*/, '')) } catch { return { description: text } }
 }
@@ -563,6 +669,7 @@ const mockLLM = {
         const isReport = sysMsg.includes('analis laporan') || userMsg.includes('Data laporan')
         const isAnalyst = sysMsg.includes('analis bisnis')
         const isSocial = sysMsg.includes('social media') || sysMsg.includes('media sosial') || userMsg.includes('caption') || userMsg.includes('brainstorm') || userMsg.includes('hashtag') || userMsg.includes('iklan')
+        const isPertumbuhan = sysMsg.includes('pertumbuhan') || sysMsg.includes('business development')
 
         // Choose appropriate mock response based on agent type
         if (isOffer) {
@@ -573,6 +680,9 @@ const mockLLM = {
         }
         if (isSocial) {
           return mockStreamSocial(userMsg)
+        }
+        if (isPertumbuhan) {
+          return mockStreamPertumbuhan(userMsg)
         }
         if (isAnalyst) {
           return mockStreamAnalyst(userMsg)
