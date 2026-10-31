@@ -8,6 +8,29 @@ Format mengikuti [Keep a Changelog](https://keepachangelog.com/id-ID/1.1.0/). Ve
 
 ## [Unreleased]
 
+### 2026-10-31 - Landing menampilkan Pendapatan dan Pertumbuhan
+
+Landing sebelumnya hanya bercerita tentang enam tahap alur. Dua grup menu terbaru — sumber nilai jual yang paling mudah dijelaskan ke calon pelanggan — tidak terlihat sama sekali. Sekarang keduanya punya bagian sendiri.
+
+#### Ditambahkan
+- Bagian **Pendapatan** (`#pendapatan`): dua kartu mesin pendapatan — **Layanan tambahan** (katalog add-on dengan batang serapan per item) dan **Tanpa limbah** (cincin persentase bebas limbah plus tiga kebocoran terbesar) — lalu strip **Ruang optimasi** dengan lima chip tim AI dan pil "Pimpinan optimasi". Semua angka pratinjau diberi label "Contoh".
+- Bagian **Pertumbuhan** (`#pertumbuhan`): empat kartu menu (Radar peluang, Rekomendasi & prediksi, Pencari prospek, Media Sosial) dan dua kartu pendamping (Penasihat AI, AI Superpowers), ditutup catatan bahwa Media Sosial memerlukan Halaman Facebook dan Instagram Bisnis.
+- Navigasi header dan menu seluler bertambah "Pendapatan" dan "Pertumbuhan"; "Roadmap" tetap ada di halaman dan footer tetapi keluar dari navigasi utama agar tetap enam tautan.
+- Ticker kemampuan diperluas dari 11 menjadi 16 pil (katalog add-on, lima aliran pemborosan, ruang optimasi lima tim, radar peluang, pencari prospek, media sosial).
+- FAQ baru: "Apa itu Layanan tambahan dan Tanpa limbah?" dan "Apakah fitur Pertumbuhan memakai data pelanggan saya?".
+
+#### Diubah
+- Statistik di bagian Alur kerja menjadi **6 tahap kerja · 5 tim AI · 2 grup tambahan**, dan paragrafnya menyebut bahwa dua grup menu memakai data alur untuk menambah pendapatan dan mencari pertumbuhan.
+- Hero: subjudul menyebut kedua mesin baru; poin di bawah CTA menambahkan "Pendapatan & pertumbuhan sudah aktif".
+- Kolom footer "Produk" menautkan kedua bagian baru.
+- Hero memakai sumber default yang sama dengan editor, sehingga subjudul baru benar-benar tampil. Klaim serapan VAS diperjelas sebagai perkiraan yang diatur pengguna; prediksi diberi keterangan data demonstrasi.
+- Angka dan jawaban ilustratif Pertumbuhan diberi label "Contoh"; persyaratan akun sosial menjelaskan Facebook, Instagram, dan Threads secara terpisah.
+
+#### Pengujian
+- `tests/e2e/landing.spec.cjs`: 81 pemeriksaan (dari 38), termasuk keberadaan kedua bagian, jumlah kartu, lima chip tim, baris pratinjau, dan navigasi anchor ke `#pendapatan`.
+- Kasus UAT TC-LND-11 dan TC-LND-12 ditambahkan; TC-LND-01 diperbarui.
+- Total 368 tes Node dan 122 pemeriksaan browser landing/site lulus. Chromium menguji 1440, 1024, 960, 959, 390, dan 320 px pada tema terang/gelap, termasuk reduced motion, overflow, dan benturan navigasi. Build produksi berhasil dengan peringatan ukuran bundel.
+
 ### 2026-10-31 - Persistensi dan validasi produksi Pendapatan
 
 Dua menu Pendapatan (**Layanan Tambahan** dan **Tanpa Limbah**) sebelumnya hanya UI di atas mock tanpa tabel D1, tanpa validasi server, dan tanpa pencarian. Perubahan ini menambahkan penyimpanan D1 dan validasi server untuk keduanya.
