@@ -20,6 +20,9 @@ import {
   VAS_CATEGORIES, VAS_STATUSES, categoryLabel, statusLabel,
   itemEconomics, attachRate, catalogPotential, discoverOpportunities, vasRevenueShare,
 } from '../business/vas-engine.js'
+import { filterRows, debounce, toCsv } from '../business/list-view.js'
+import { validateVasItem, vasKey, splitDuplicates, assertImportSize } from '../pendapatan/rules.js'
+import { downloadText, datedName } from '../ui/download.js'
 import { renderOptimasi } from './optimasi-panel.js'
 
 const { el } = C
@@ -29,6 +32,10 @@ const TABS = [
   { value: 'optimasi', label: 'Ruang optimasi' },
 ]
 let currentTab = 'peluang'
+// Kept outside render() so switching tabs does not reset what the user typed.
+let catalogQuery = ''
+let catalogStatus = 'all'
+let skipDuplicates = true
 
 const KIND_TONE = {
   langganan: 'brand', berkala: 'ok', garansi: 'warn', bundling: 'brand', tertahan: 'danger', marginkatalog: 'neutral',
@@ -47,18 +54,12 @@ async function fetchItems() {
 }
 
 async function saveItem(fields, id) {
-  const row = {
-    name: String(fields.name || '').trim(),
-    category: fields.category || 'lain',
-    price: Number(fields.price) || 0,
-    cost: Number(fields.cost) || 0,
-    attach_to: String(fields.attach_to || '').trim() || null,
-    attach_rate: Number(fields.attach_rate) || 0,
-    description: String(fields.description || '').trim() || null,
-    status: fields.status || 'active',
-  }
+  // One validator for the form, the bulk import, the mock and the Worker.
+  const row = validateVasItem(fields)
   const table = getCloud().database.from('vas_items')
-  const { error } = id ? await table.update(row).eq('id', id) : await table.insert(row)
+  const { error } = id
+    ? await table.update({ ...row, updated_at: new Date().toISOString() }).eq('id', id)
+    : await table.insert(row)
   if (error) throw new Error(error.message)
   notifyDataChanged()
 }
@@ -84,10 +85,12 @@ function parseBulk(text) {
     let rows
     try { rows = JSON.parse(raw) } catch { throw new Error('JSON tidak valid. Periksa koma dan tanda kutip.') }
     if (!Array.isArray(rows)) throw new Error('JSON harus berupa daftar item.')
-    return rows.map((r, i) => normalizeRow(r, i + 1, clean))
+    const parsed = rows.map((r, i) => normalizeRow(r, i + 1, clean))
+    assertImportSize(parsed.length)
+    return parsed
   }
 
-  return raw.split('\n')
+  const rows = raw.split('\n')
     .map((line, i) => ({ line: line.trim(), i: i + 1 }))
     .filter(({ line }) => line && !line.startsWith('#'))
     .map(({ line, i }) => {
@@ -97,23 +100,26 @@ function parseBulk(text) {
         category: parts[3], attach_to: parts[4], attach_rate: parts[5],
       }, i, clean)
     })
+  assertImportSize(rows.length)
+  return rows
 }
 
+/** One row through the shared validator; line numbers stay readable for pasted sheets. */
 function normalizeRow(r, lineNo, clean) {
-  const name = clean(r.name ?? r.nama)
-  if (!name) throw new Error(`Baris ${lineNo}: nama item wajib diisi.`)
-  const price = Number(String(r.price ?? r.harga ?? '').replace(/[^\d]/g, ''))
-  if (!(price > 0)) throw new Error(`Baris ${lineNo}: harga harus lebih dari nol.`)
-  const cost = Number(String(r.cost ?? r.biaya ?? 0).replace(/[^\d]/g, '')) || 0
   const catRaw = clean(r.category ?? r.kategori).toLowerCase()
-  const category = VAS_CATEGORIES.some((c) => c.value === catRaw) ? catRaw : 'lain'
-  const rateRaw = clean(r.attach_rate ?? r.tingkat_pasang ?? '')
-  return {
-    name, price, cost, category,
-    attach_to: clean(r.attach_to ?? r.layanan) || null,
-    attach_rate: rateRaw ? Math.min(100, Math.max(0, Number(rateRaw) || 0)) : 25,
-    description: clean(r.description ?? r.keterangan) || null,
-    status: 'active',
+  try {
+    return validateVasItem({
+      name: clean(r.name ?? r.nama),
+      price: r.price ?? r.harga,
+      cost: r.cost ?? r.biaya ?? 0,
+      category: VAS_CATEGORIES.some((c) => c.value === catRaw) ? catRaw : 'lain',
+      attach_to: clean(r.attach_to ?? r.layanan),
+      attach_rate: r.attach_rate ?? r.tingkat_pasang ?? 25,
+      description: clean(r.description ?? r.keterangan),
+      status: clean(r.status) || 'active',
+    })
+  } catch (err) {
+    throw new Error(`Baris ${lineNo}: ${err.message}`)
   }
 }
 
@@ -229,55 +235,122 @@ export async function render(container, ctx = {}) {
 
   /* ------------------------------------------------------------- Katalog */
 
-  function drawKatalog() {
-    const active = items.filter((i) => i.status === 'active')
+  let catalogList = null
+  let catalogNote = null
+
+  const filteredItems = () => filterRows(items, {
+    query: catalogQuery,
+    fields: ['name', 'description', 'attach_to', 'category'],
+    filters: { status: catalogStatus },
+  })
+
+  function catalogTable(rows) {
+    return C.dataTable({
+      caption: 'Katalog layanan tambahan',
+      columns: [
+        { key: 'name', label: 'Item', render: (r) => C.cellStack(r.name, el('span', { className: 'vas-clamp' }, r.description || categoryLabel(r.category))) },
+        { key: 'category', label: 'Kategori', render: (r) => categoryLabel(r.category) },
+        { key: 'price', label: 'Harga', align: 'right', render: (r) => C.rupiah(r.price) },
+        { key: 'cost', label: 'Biaya', align: 'right', render: (r) => C.rupiah(r.cost) },
+        {
+          key: 'margin', label: 'Margin', align: 'right',
+          render: (r) => {
+            const e = itemEconomics(r)
+            return el('span', { className: `vas-margin ${e.marginPct < 25 ? 'is-thin' : ''}` },
+              el('strong', { className: 'tnum' }, `${e.marginPct.toFixed(0)}%`),
+              el('span', { className: 'tnum' }, C.rupiah(e.margin)))
+          },
+        },
+        { key: 'attach_to', label: 'Menempel pada', render: (r) => r.attach_to || el('span', { className: 'muted' }, 'Semua layanan') },
+        { key: 'attach_rate', label: 'Pasang', align: 'right', render: (r) => `${Math.round(attachRate(r) * 100)}%` },
+        { key: 'status', label: 'Status', render: (r) => C.tag(statusLabel(r.status), r.status === 'active' ? 'ok' : r.status === 'draft' ? 'warn' : 'neutral') },
+        {
+          key: 'act', label: '', className: 'vas-row-actions',
+          render: (r) => el('div', { className: 'vas-row-actions-in' },
+            C.iconButton({ iconName: 'pencil', label: `Ubah ${r.name}`, onClick: () => openEditor(r) }),
+            C.iconButton({ iconName: 'trash', label: `Hapus ${r.name}`, onClick: () => confirmDelete(r) })),
+        },
+      ],
+      rows,
+    })
+  }
+
+  /** Redraws the table and the count line only — the search box keeps focus. */
+  function refreshCatalog() {
+    if (!catalogList) return
+    const rows = filteredItems()
+    catalogList.update(rows, { resetKey: `${catalogQuery}|${catalogStatus}` })
+    const active = items.filter((i) => i.status === 'active').length
     const cat = catalogPotential(items)
+    catalogNote.textContent = `${rows.length} dari ${items.length} item · ${active} aktif · potensi ${C.rupiah(cat.monthly)}/bulan`
+  }
+
+  function exportCatalog() {
+    const rows = filteredItems()
+    if (!rows.length) { showToast('Tidak ada baris untuk diekspor.', 'warn'); return }
+    downloadText(datedName('katalog-vas'), toCsv([
+      { label: 'Item', value: (r) => r.name },
+      { label: 'Kategori', value: (r) => categoryLabel(r.category) },
+      { label: 'Harga', key: 'price' },
+      { label: 'Biaya', key: 'cost' },
+      { label: 'Margin', value: (r) => itemEconomics(r).margin },
+      { label: 'Margin persen', value: (r) => Math.round(itemEconomics(r).marginPct) },
+      { label: 'Layanan induk', value: (r) => r.attach_to || '' },
+      { label: 'Tingkat pasang', key: 'attach_rate' },
+      { label: 'Status', value: (r) => statusLabel(r.status) },
+      { label: 'Dibuat', value: (r) => r.created_at || '' },
+    ], rows))
+    showToast(`${rows.length} item diekspor ke CSV.`, 'success')
+  }
+
+  function drawKatalog() {
+    const search = el('input', {
+      type: 'search',
+      className: 'pd-search',
+      value: catalogQuery,
+      placeholder: 'Cari item, layanan induk, atau kategori…',
+      'aria-label': 'Cari item katalog',
+    })
+    search.addEventListener('input', debounce(() => { catalogQuery = search.value; refreshCatalog() }, 150))
+
+    const statusFilter = el('select', { className: 'pd-filter', 'aria-label': 'Saring status item' },
+      [{ value: 'all', label: 'Semua status' }, ...VAS_STATUSES].map((o) => el('option', { value: o.value }, o.label)))
+    statusFilter.value = catalogStatus
+    statusFilter.addEventListener('change', () => { catalogStatus = statusFilter.value; refreshCatalog() })
+
+    catalogNote = el('span', { className: 'vas-toolbar-note' })
 
     const toolbar = el('div', { className: 'vas-toolbar' },
       C.button({ label: 'Tambah item', icon: 'plus', variant: 'primary', size: 'sm', onClick: () => openEditor(null) }),
       C.button({ label: 'Impor massal', icon: 'layers', size: 'sm', onClick: openBulk }),
-      el('span', { className: 'vas-toolbar-note' },
-        `${items.length} item · ${active.length} aktif · potensi ${C.rupiah(cat.monthly)}/bulan`),
+      el('div', { className: 'pd-filters' }, search, statusFilter),
+      C.button({ label: 'Ekspor CSV', icon: 'file', size: 'sm', variant: 'ghost', onClick: exportCatalog }),
+      catalogNote,
     )
 
-    const body = items.length
-      ? C.dataTable({
-        caption: 'Katalog layanan tambahan',
-        columns: [
-          { key: 'name', label: 'Item', render: (r) => C.cellStack(r.name, el('span', { className: 'vas-clamp' }, r.description || categoryLabel(r.category))) },
-          { key: 'category', label: 'Kategori', render: (r) => categoryLabel(r.category) },
-          { key: 'price', label: 'Harga', align: 'right', render: (r) => C.rupiah(r.price) },
-          { key: 'cost', label: 'Biaya', align: 'right', render: (r) => C.rupiah(r.cost) },
-          {
-            key: 'margin', label: 'Margin', align: 'right',
-            render: (r) => {
-              const e = itemEconomics(r)
-              return el('span', { className: `vas-margin ${e.marginPct < 25 ? 'is-thin' : ''}` },
-                el('strong', { className: 'tnum' }, `${e.marginPct.toFixed(0)}%`),
-                el('span', { className: 'tnum' }, C.rupiah(e.margin)))
-            },
-          },
-          { key: 'attach_to', label: 'Menempel pada', render: (r) => r.attach_to || el('span', { className: 'muted' }, 'Semua layanan') },
-          { key: 'attach_rate', label: 'Pasang', align: 'right', render: (r) => `${Math.round(attachRate(r) * 100)}%` },
-          { key: 'status', label: 'Status', render: (r) => C.tag(statusLabel(r.status), r.status === 'active' ? 'ok' : r.status === 'draft' ? 'warn' : 'neutral') },
-          {
-            key: 'act', label: '', className: 'vas-row-actions',
-            render: (r) => el('div', { className: 'vas-row-actions-in' },
-              C.iconButton({ iconName: 'pencil', label: `Ubah ${r.name}`, onClick: () => openEditor(r) }),
-              C.iconButton({ iconName: 'trash', label: `Hapus ${r.name}`, onClick: () => confirmDelete(r) })),
-          },
-        ],
-        rows: items,
-      })
-      : C.emptyState({
+    if (!items.length) {
+      catalogList = null
+      host.replaceChildren(toolbar, C.emptyState({
         kicker: 'Katalog kosong',
         title: 'Belum ada layanan tambahan',
         body: 'Tambahkan satu item, atau tempel daftar harga Anda sekaligus lewat Impor massal.',
         iconName: 'layers',
         action: C.button({ label: 'Tambah item pertama', icon: 'plus', variant: 'primary', onClick: () => openEditor(null) }),
-      })
+      }))
+      catalogNote.textContent = '0 item · potensi Rp0/bulan'
+      return
+    }
 
-    host.replaceChildren(toolbar, body)
+    catalogList = C.paginate({
+      key: 'vas-katalog',
+      label: 'katalog layanan tambahan',
+      pageSize: 10,
+      render: (rows) => (rows.length
+        ? catalogTable(rows)
+        : el('p', { className: 'pd-none' }, 'Tidak ada item yang cocok. Ubah kata kunci atau saringan status.')),
+    })
+    host.replaceChildren(toolbar, catalogList.root)
+    refreshCatalog()
   }
 
   /* ------------------------------------------------------------- Optimasi */
@@ -375,7 +448,7 @@ export async function render(container, ctx = {}) {
         desc.wrap,
         statusSel.wrap,
       ],
-      actions: [C.button({ label: 'Batal', variant: 'ghost' }), saveBtn],
+      actions: [C.button({ label: 'Batal', variant: 'ghost', dismiss: true }), saveBtn],
       opener: container,
     })
 
@@ -407,7 +480,7 @@ export async function render(container, ctx = {}) {
       title: 'Hapus item VAS?',
       description: `"${item.name}" akan dihapus dari katalog. Riwayat pendapatan yang sudah tercatat tidak berubah.`,
       children: [el('p', { className: 'vas-muted' }, 'Tindakan ini tidak bisa dibatalkan.')],
-      actions: [C.button({ label: 'Batal', variant: 'ghost' }), delBtn],
+      actions: [C.button({ label: 'Batal', variant: 'ghost', dismiss: true }), delBtn],
       opener: container,
     })
     delBtn.addEventListener('click', async (e) => {
@@ -438,11 +511,22 @@ export async function render(container, ctx = {}) {
     })
 
     const preview = el('div', { className: 'vas-bulk-preview' })
+    const skip = el('input', { type: 'checkbox', id: 'vas-bulk-skip', checked: skipDuplicates })
+    skip.addEventListener('change', () => { skipDuplicates = skip.checked; check() })
+    const skipWrap = el('label', { className: 'pd-check', for: 'vas-bulk-skip' },
+      skip, el('span', {}, 'Lewati item yang namanya sudah ada di katalog'))
+
+    const split = () => {
+      const rows = parseBulk(ta.input.value)
+      return { rows, ...splitDuplicates(rows, items, (r) => vasKey(r.name)) }
+    }
+
     const check = () => {
       try {
-        const rows = parseBulk(ta.input.value)
+        const { fresh, duplicates } = split()
         preview.className = 'vas-bulk-preview is-ok'
-        preview.textContent = `${rows.length} item siap diimpor. Contoh: ${rows[0].name} — ${C.rupiah(rows[0].price)}`
+        const extra = duplicates.length ? ` · ${duplicates.length} sudah ada${skip.checked ? ' dan dilewati' : ''}` : ''
+        preview.textContent = `${fresh.length} item baru${extra}. Contoh: ${fresh[0]?.name || duplicates[0]?.name} — ${C.rupiah(fresh[0]?.price || duplicates[0]?.price || 0)}`
       } catch (err) {
         preview.className = 'vas-bulk-preview is-bad'
         preview.textContent = err.message
@@ -456,22 +540,25 @@ export async function render(container, ctx = {}) {
       title: 'Impor massal item VAS',
       description: 'Tempel dari spreadsheet, atau pilih berkas JSON/CSV. Baris yang salah akan ditolak seluruhnya agar katalog tidak setengah jadi.',
       wide: true,
-      children: [modalNote, el('div', { className: 'vas-bulk-file' }, el('span', {}, 'Pilih berkas'), fileInput), ta.wrap, preview],
-      actions: [C.button({ label: 'Batal', variant: 'ghost' }), importBtn],
+      children: [modalNote, el('div', { className: 'vas-bulk-file' }, el('span', {}, 'Pilih berkas'), fileInput), ta.wrap, skipWrap, preview],
+      actions: [C.button({ label: 'Batal', variant: 'ghost', dismiss: true }), importBtn],
       opener: container,
     })
 
     importBtn.addEventListener('click', async (e) => {
       e.preventDefault()
       modalNote.hide()
-      let rows
-      try { rows = parseBulk(ta.input.value) } catch (err) { modalNote.show('warn', err.message); return }
+      let plan
+      try { plan = split() } catch (err) { modalNote.show('warn', err.message); return }
+      const rows = skip.checked ? plan.fresh : plan.rows
+      const skipped = plan.rows.length - rows.length
+      if (!rows.length) { modalNote.show('warn', 'Semua baris sudah ada di katalog. Tidak ada yang diimpor.'); return }
       const restore = C.setBusy(importBtn, 'Mengimpor…')
       try {
         const { error } = await getCloud().database.from('vas_items').insert(rows)
         if (error) throw new Error(error.message)
         dialog.close()
-        showToast(`${rows.length} item diimpor.`, 'success')
+        showToast(`${rows.length} item diimpor${skipped ? `, ${skipped} dilewati` : ''}.`, 'success')
         notifyDataChanged()
         await reload()
       } catch (err) { modalNote.show('danger', err.message) } finally { restore() }
@@ -479,6 +566,17 @@ export async function render(container, ctx = {}) {
   }
 
   /* ----------------------------------------------------------------- Load */
+
+  /** Load failure with a retry that does not force a full page reload. */
+  function errorView(message) {
+    const box = C.errorState(message)
+    const retry = C.button({
+      label: 'Coba lagi', icon: 'refresh', size: 'sm',
+      onClick: () => { host.replaceChildren(C.skeletonRows(4)); reload() },
+    })
+    box.querySelector('.note-body')?.appendChild(el('div', { className: 'note-actions' }, retry))
+    return box
+  }
 
   async function reload() {
     try {
@@ -490,7 +588,7 @@ export async function render(container, ctx = {}) {
     if (ctx.signal?.aborted) return
     if (loadError) {
       status.show('danger', `Gagal memuat data: ${loadError.message}`)
-      host.replaceChildren(C.errorState(loadError.message))
+      host.replaceChildren(errorView(loadError.message))
       return
     }
     draw()

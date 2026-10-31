@@ -10,20 +10,22 @@
  * numbers as context and argues about them; it never invents them.
  */
 
-export const VAS_CATEGORIES = [
-  { value: 'perawatan', label: 'Perawatan berkala' },
-  { value: 'perlindungan', label: 'Perlindungan & garansi' },
-  { value: 'peningkatan', label: 'Peningkatan kualitas' },
-  { value: 'kecepatan', label: 'Kecepatan & prioritas' },
-  { value: 'paket', label: 'Paket & langganan' },
-  { value: 'lain', label: 'Lain-lain' },
-]
+import { VAS_CATEGORY_KEYS, VAS_STATUS_KEYS } from '../pendapatan/rules.js'
 
-export const VAS_STATUSES = [
-  { value: 'active', label: 'Aktif' },
-  { value: 'draft', label: 'Draf' },
-  { value: 'retired', label: 'Dihentikan' },
-]
+const CATEGORY_LABELS = {
+  perawatan: 'Perawatan berkala',
+  perlindungan: 'Perlindungan & garansi',
+  peningkatan: 'Peningkatan kualitas',
+  kecepatan: 'Kecepatan & prioritas',
+  paket: 'Paket & langganan',
+  lain: 'Lain-lain',
+}
+const STATUS_LABELS = { active: 'Aktif', draft: 'Draf', retired: 'Dihentikan' }
+
+// Order and labels come from the shared rules so a new category cannot be
+// accepted by the database and missing from this form.
+export const VAS_CATEGORIES = VAS_CATEGORY_KEYS.map((value) => ({ value, label: CATEGORY_LABELS[value] }))
+export const VAS_STATUSES = VAS_STATUS_KEYS.map((value) => ({ value, label: STATUS_LABELS[value] }))
 
 export const categoryLabel = (v) => VAS_CATEGORIES.find((c) => c.value === v)?.label || 'Lain-lain'
 export const statusLabel = (v) => VAS_STATUSES.find((s) => s.value === v)?.label || 'Draf'
@@ -39,12 +41,14 @@ export function itemEconomics(item) {
 
 /**
  * Attach rate as a 0..1 fraction. Stored as a whole percent (e.g. 25) so the
- * form can stay human; values above 1 are read as percent.
+ * form can stay human; src/pendapatan/rules.js normalises it on write.
  */
 export function attachRate(item) {
   const r = Number(item?.attach_rate)
   if (!Number.isFinite(r)) return 0.25
-  return Math.min(1, Math.max(0, r > 1 ? r / 100 : r))
+  // Stored as a whole percent; a legacy 0.4 still reads as 40%.
+  const pct = r > 0 && r < 1 ? r * 100 : r
+  return Math.min(1, Math.max(0, pct / 100))
 }
 
 /** Attach value: what one item is worth per month at a given attach rate. */

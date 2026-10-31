@@ -166,6 +166,7 @@ Unik pada (`assignment_id`, `worker_id`).
 | `id` | INTEGER PK AUTOINCREMENT | |
 | `owner_id` | TEXT NOT NULL | |
 | `completion_id` | INTEGER NOT NULL | FK `completions(id)` |
+| `vas_item_id` | INTEGER | Referensi `vas_items(id)` divalidasi API beserta kepemilikannya; `NULL` = pendapatan jasa biasa. Ditambahkan `0008_pendapatan.sql` |
 | `amount` | NUMERIC NOT NULL | |
 | `category` | TEXT NOT NULL | lihat nilai di bawah |
 | `status` | TEXT NOT NULL DEFAULT `'pending'` | |
@@ -196,6 +197,12 @@ Unik pada (`assignment_id`, `worker_id`).
 | ledger_entries.status | `pending`, `posted` |
 | ledger_entries.category | `pendapatan`, `biaya_tenaga`, `biaya_bahan`, `biaya_transport`, `biaya_lain` |
 | reports.status | `draft`, `final` |
+| vas_items.category | `perawatan`, `perlindungan`, `peningkatan`, `kecepatan`, `paket`, `lain` — **juga** CHECK constraint |
+| vas_items.status | `active`, `draft`, `retired` — **juga** CHECK constraint |
+| waste_entries.stream | `waktu`, `perjalanan`, `bahan`, `pengerjaan_ulang`, `air_kimia` — **juga** CHECK constraint |
+| waste_entries.status | `open`, `progress`, `done` — **juga** CHECK constraint |
+
+Nilai `vas_items` dan `waste_entries` berasal dari satu sumber di `src/pendapatan/rules.js` (`VAS_CATEGORY_KEYS`, `VAS_STATUS_KEYS`, `WASTE_STREAM_KEYS`, `WASTE_STATUS_KEYS`) yang dipakai formulir, Worker, dan mock; migrasi hanya mencerminkannya.
 
 ## Relasi
 
@@ -207,7 +214,10 @@ erDiagram
   offers ||--o{ assignments : offer_id
   assignments ||--o{ completions : assignment_id
   completions ||--o{ ledger_entries : completion_id
+  vas_items ||--o{ ledger_entries : vas_item_id
   users ||--o{ reports : "owner_id"
+  users ||--o{ vas_items : "owner_id"
+  users ||--o{ waste_entries : "owner_id"
 ```
 
 Catatan: `owner_id` pada tabel domain tidak dideklarasikan sebagai foreign key ke `users` di migrasi; konsistensinya dijaga Worker.
@@ -224,9 +234,57 @@ Catatan: `owner_id` pada tabel domain tidak dideklarasikan sebagai foreign key k
 
 Migrasi ini juga menambah `social_contents.image_key`. `social_schedules` tidak berubah: tetap pengingat bebas tahap "Media sosial" dan tidak pernah diproses cron.
 
+## Tabel Pendapatan (migrasi `0008_pendapatan.sql`)
+
+Dua tabel untuk menu **Pendapatan** (Layanan Tambahan dan Tanpa Limbah). Keduanya milik pengguna (`owner_id`) dan hanya dijangkau lewat `/api/db`, yang selalu memfilter berdasarkan pemilik terautentikasi. Berbeda dari tabel domain lain, aturan di sini **juga** ditegakkan sebagai CHECK constraint, bukan hanya di aplikasi.
+
+### vas_items
+
+Katalog add-on (Layanan Tambahan).
+
+| Kolom | Tipe | Catatan |
+|-------|------|---------|
+| `id` | INTEGER PK AUTOINCREMENT | |
+| `owner_id` | TEXT NOT NULL | |
+| `name` | TEXT NOT NULL | 2–80 karakter (aturan aplikasi) |
+| `category` | TEXT NOT NULL DEFAULT `'lain'` | CHECK: `perawatan`, `perlindungan`, `peningkatan`, `kecepatan`, `paket`, `lain` |
+| `price` | INTEGER NOT NULL | Rupiah bulat, CHECK `> 0 AND <= 1000000000` |
+| `cost` | INTEGER NOT NULL DEFAULT `0` | Rupiah bulat, CHECK `>= 0 AND <= 1000000000` |
+| `attach_to` | TEXT | Jenis jasa pasangannya; `NULL` = semua jasa |
+| `attach_rate` | INTEGER NOT NULL DEFAULT `25` | Persen bulat 0–100 (25 = satu dari empat pekerjaan mengambil add-on) |
+| `description` | TEXT | Maks 400 karakter |
+| `status` | TEXT NOT NULL DEFAULT `'active'` | CHECK: `active`, `draft`, `retired` |
+| `created_at` | TEXT NOT NULL | |
+| `updated_at` | TEXT NOT NULL | Diisi Worker/mock saat insert dan setiap update |
+
+Indeks: `idx_vas_items_owner` pada (`owner_id`, `created_at`).
+
+### waste_entries
+
+Satu baris per temuan pemborosan (Tanpa Limbah).
+
+| Kolom | Tipe | Catatan |
+|-------|------|---------|
+| `id` | INTEGER PK AUTOINCREMENT | |
+| `owner_id` | TEXT NOT NULL | |
+| `stream` | TEXT NOT NULL DEFAULT `'waktu'` | CHECK: `waktu`, `perjalanan`, `bahan`, `pengerjaan_ulang`, `air_kimia` |
+| `title` | TEXT NOT NULL | 3–120 karakter (aturan aplikasi) |
+| `detail` | TEXT | Maks 1000 karakter |
+| `monthly_loss` | INTEGER NOT NULL | Rupiah per bulan, CHECK `> 0 AND <= 1000000000` |
+| `saved` | INTEGER NOT NULL DEFAULT `0` | Rupiah per bulan yang sudah dihentikan, CHECK `>= 0` **dan** CHECK tabel `saved <= monthly_loss` |
+| `action` | TEXT | Maks 500 karakter |
+| `owner` | TEXT | Penanggung jawab (teks bebas, maks 80) |
+| `status` | TEXT NOT NULL DEFAULT `'open'` | CHECK: `open`, `progress`, `done` |
+| `created_at` | TEXT NOT NULL | |
+| `updated_at` | TEXT NOT NULL | Diisi Worker/mock saat insert dan setiap update |
+
+Indeks: `idx_waste_entries_owner` pada (`owner_id`, `created_at`), `idx_waste_entries_stream` pada (`owner_id`, `stream`).
+
+**Mengapa `saved <= monthly_loss` ditegakkan di skema:** angka "bebas limbah" dihitung dari `SUM(saved) / SUM(monthly_loss)`. Tanpa batas ini satu baris bisa membuat persentase melewati 100% dan seluruh laporan jadi tidak masuk akal. Aturan yang sama ada di `src/pendapatan/rules.js` sehingga formulir, Worker, mock, dan database menolak input yang sama.
+
 ## Migrasi
 
-- Berkas: `migrations/0001_init.sql` (memakai `CREATE TABLE IF NOT EXISTS`).
+- Berkas: `migrations/0001_init.sql` (memakai `CREATE TABLE IF NOT EXISTS`) sampai `migrations/0008_pendapatan.sql`.
 - Lokal: `npm run db:migrate:local`; remote: `npm run db:migrate:remote`.
 - Perubahan skema: tambahkan berkas bernomor berikutnya, dan perbarui whitelist di `worker/index.js` bila kolom/tabel domain berubah ([21_BACKEND.md](21_BACKEND.md)).
 - Kebijakan retensi data, backup, dan ukuran batas D1: _TBD_.

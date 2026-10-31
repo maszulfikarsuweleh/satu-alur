@@ -745,3 +745,81 @@
   .vas-opp-owner { margin-left: 0; }
   .opt-team-body { max-height: none; }
 }
+
+/* ------------------------------------------------ List controls (both tabs) */
+
+/* Search + filters sit inside the existing toolbar, between the actions. */
+.pd-filters {
+  display: flex;
+  align-items: center;
+  gap: var(--s-2);
+  flex-wrap: wrap;
+}
+
+.pd-search {
+  min-height: 44px;
+  width: 240px;
+  max-width: 100%;
+  padding: 0 var(--s-3);
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+  font-size: var(--fs-sm);
+}
+
+.pd-search::placeholder { color: var(--text-faint); }
+
+.pd-search:focus-visible,
+.pd-filter:focus-visible {
+  outline: none;
+  border-color: var(--brand);
+  box-shadow: 0 0 0 3px var(--ring);
+}
+
+.pd-filter {
+  min-height: 44px;
+  padding: 0 var(--s-3);
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+  font-size: var(--fs-sm);
+}
+
+/* "No rows match" — a table-sized message, not an empty state. */
+.pd-none {
+  margin: 0;
+  padding: var(--s-8) var(--s-4);
+  border: 1px dashed var(--line);
+  border-radius: var(--r-md);
+  color: var(--text-muted);
+  font-size: var(--fs-sm);
+  text-align: center;
+}
+
+/* Inline checkbox row inside the import modal. */
+.pd-check {
+  display: flex;
+  align-items: center;
+  gap: var(--s-2);
+  min-height: 44px;
+  font-size: var(--fs-sm);
+  color: var(--text-2);
+  cursor: pointer;
+}
+
+.pd-check input {
+  width: 18px;
+  height: 18px;
+  accent-color: var(--brand);
+  flex: none;
+}
+
+@media (max-width: 720px) {
+  .pd-search { width: 100%; }
+  .pd-filters { width: 100%; }
+  .pd-filter { flex: 1 1 140px; }
+}

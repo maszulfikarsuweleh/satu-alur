@@ -21,6 +21,8 @@
  * denominator — that is what makes "100% bebas limbah" meaningful.
  */
 
+import { WASTE_STATUS_KEYS } from '../pendapatan/rules.js'
+
 export const WASTE_STREAMS = [
   {
     key: 'waktu',
@@ -71,11 +73,11 @@ export const WASTE_STREAMS = [
 
 export const streamMeta = (key) => WASTE_STREAMS.find((s) => s.key === key) || { key, label: key, short: key, icon: 'sprout', benchmark: 0, why: '', fix: '' }
 
-export const WASTE_STATUSES = [
-  { value: 'open', label: 'Belum ditangani' },
-  { value: 'progress', label: 'Sedang dikerjakan' },
-  { value: 'done', label: 'Selesai' },
-]
+const STATUS_LABELS = { open: 'Belum ditangani', progress: 'Sedang dikerjakan', done: 'Selesai' }
+
+// Shared with the Worker's CHECK constraint: a status the form offers is
+// always one the database accepts.
+export const WASTE_STATUSES = WASTE_STATUS_KEYS.map((value) => ({ value, label: STATUS_LABELS[value] }))
 export const statusLabel = (v) => WASTE_STATUSES.find((s) => s.value === v)?.label || 'Belum ditangani'
 
 const num = (v) => (Number.isFinite(Number(v)) ? Number(v) : 0)

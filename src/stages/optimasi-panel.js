@@ -103,8 +103,9 @@ function saveRun(scope, job) {
  */
 export function renderOptimasi(host, ctx = {}, { scope, context = '', facts = [], presets = [] }) {
   const scopeLabel = SCOPE_LABEL[scope] || scope
-  let job = jobs.get(scope) || loadRun(scope)
-  if (job) jobs.set(scope, job)
+  const runKey = `${ctx.user?.id || 'anon'}:${scope}`
+  let job = jobs.get(runKey) || loadRun(runKey)
+  if (job) jobs.set(runKey, job)
 
   const status = C.message()
 
@@ -295,7 +296,7 @@ export function renderOptimasi(host, ctx = {}, { scope, context = '', facts = []
       listeners: new Set(),
       ac,
     }
-    jobs.set(scope, job)
+    jobs.set(runKey, job)
     paint()
 
     let model = null
@@ -317,7 +318,7 @@ export function renderOptimasi(host, ctx = {}, { scope, context = '', facts = []
           job.lead = ev.text
           job.phase = 'done'
           job.at = new Date().toISOString()
-          saveRun(scope, job)
+          saveRun(runKey, job)
         } else if (ev.type === 'lead-error') {
           job.phase = 'done'
           job.error = ev.message

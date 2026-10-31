@@ -17,6 +17,12 @@ import {
   WASTE_STREAMS, WASTE_STATUSES, streamMeta, statusLabel,
   computeWaste, benchmarkVerdict, closurePlan,
 } from '../business/waste-engine.js'
+import { filterRows, debounce, toCsv } from '../business/list-view.js'
+import {
+  validateWasteEntry, withWasteCompletion, assertWasteInvariants,
+  wasteKey, splitDuplicates, assertImportSize,
+} from '../pendapatan/rules.js'
+import { downloadText, datedName } from '../ui/download.js'
 import { renderOptimasi } from './optimasi-panel.js'
 
 const { el, icon } = C
@@ -26,6 +32,11 @@ const TABS = [
   { value: 'optimasi', label: 'Ruang optimasi' },
 ]
 let currentTab = 'pemborosan'
+// Survives tab switches so the user's filter is still there when they return.
+let entryQuery = ''
+let entryStream = 'all'
+let entryStatus = 'all'
+let skipDuplicates = true
 
 const STATUS_TONE = { open: 'danger', progress: 'warn', done: 'ok' }
 
@@ -38,21 +49,13 @@ async function fetchEntries() {
 }
 
 async function saveEntry(fields, id) {
-  const loss = Number(fields.monthly_loss) || 0
-  const saved = Math.min(loss, Number(fields.saved) || 0)
-  const row = {
-    stream: fields.stream || 'waktu',
-    title: String(fields.title || '').trim(),
-    detail: String(fields.detail || '').trim() || null,
-    monthly_loss: loss,
-    saved,
-    action: String(fields.action || '').trim() || null,
-    owner: String(fields.owner || '').trim() || null,
-    status: fields.status || 'open',
-  }
-  if (row.status === 'done') row.saved = loss
+  // Same validator as the Worker: the form cannot save what D1 would reject.
+  const row = withWasteCompletion(validateWasteEntry(fields))
+  assertWasteInvariants(row)
   const table = getCloud().database.from('waste_entries')
-  const { error } = id ? await table.update(row).eq('id', id) : await table.insert(row)
+  const { error } = id
+    ? await table.update({ ...row, updated_at: new Date().toISOString() }).eq('id', id)
+    : await table.insert(row)
   if (error) throw new Error(error.message)
   notifyDataChanged()
 }
@@ -65,7 +68,7 @@ async function removeEntry(id) {
 
 async function closeEntry(entry) {
   const { error } = await getCloud().database.from('waste_entries')
-    .update({ saved: Number(entry.monthly_loss) || 0, status: 'done' })
+    .update({ saved: Number(entry.monthly_loss) || 0, status: 'done', updated_at: new Date().toISOString() })
     .eq('id', entry.id)
   if (error) throw new Error(error.message)
   notifyDataChanged()
@@ -196,52 +199,125 @@ export async function render(container, ctx = {}) {
 
   /* ------------------------------------------------------------ Tindakan */
 
-  function drawActions() {
+  let entryList = null
+  let entryNote = null
+
+  const filteredEntries = () => filterRows(entries, {
+    query: entryQuery,
+    fields: ['title', 'detail', 'action', 'owner'],
+    filters: { stream: entryStream, status: entryStatus },
+  })
+
+  function entryTable(rows) {
+    return C.dataTable({
+      caption: 'Temuan pemborosan dan tindakannya',
+      columns: [
+        { key: 'title', label: 'Temuan', render: (r) => C.cellStack(r.title, el('span', { className: 'zw-clamp' }, r.detail || streamMeta(r.stream).label)) },
+        { key: 'stream', label: 'Sumber', render: (r) => streamMeta(r.stream).short },
+        { key: 'monthly_loss', label: 'Kerugian/bln', align: 'right', render: (r) => C.rupiah(r.monthly_loss) },
+        { key: 'saved', label: 'Terhenti', align: 'right', render: (r) => C.rupiah(r.saved) },
+        {
+          key: 'remaining', label: 'Sisa', align: 'right',
+          render: (r) => {
+            const left = Math.max(0, (Number(r.monthly_loss) || 0) - (Number(r.saved) || 0))
+            return el('strong', { className: `tnum ${left > 0 ? 'zw-left' : ''}` }, C.rupiah(left))
+          },
+        },
+        { key: 'owner', label: 'Pemilik', render: (r) => r.owner || el('span', { className: 'muted' }, '—') },
+        { key: 'status', label: 'Status', render: (r) => C.tag(statusLabel(r.status), STATUS_TONE[r.status] || 'neutral') },
+        {
+          key: 'act', label: '', className: 'zw-row-actions',
+          render: (r) => el('div', { className: 'zw-row-actions-in' },
+            r.status !== 'done'
+              ? C.iconButton({ iconName: 'check', label: `Tandai selesai: ${r.title}`, onClick: () => markDone(r) })
+              : null,
+            C.iconButton({ iconName: 'pencil', label: `Ubah ${r.title}`, onClick: () => openEditor(r) }),
+            C.iconButton({ iconName: 'trash', label: `Hapus ${r.title}`, onClick: () => confirmDelete(r) })),
+        },
+      ],
+      rows,
+    })
+  }
+
+  /** Redraws table + count only, so typing in the search box keeps focus. */
+  function refreshEntries() {
+    if (!entryList) return
+    const rows = filteredEntries()
+    entryList.update(rows, { resetKey: `${entryQuery}|${entryStream}|${entryStatus}` })
     const w = computeWaste(entries, revenue())
+    entryNote.textContent = `${rows.length} dari ${entries.length} temuan · ${w.open} terbuka · ${C.rupiah(w.winnable)} bisa dihemat`
+  }
+
+  function exportEntries() {
+    const rows = filteredEntries()
+    if (!rows.length) { showToast('Tidak ada baris untuk diekspor.', 'warn'); return }
+    downloadText(datedName('temuan-limbah'), toCsv([
+      { label: 'Temuan', value: (r) => r.title },
+      { label: 'Sumber', value: (r) => streamMeta(r.stream).label },
+      { label: 'Kerugian per bulan', key: 'monthly_loss' },
+      { label: 'Sudah dihentikan', key: 'saved' },
+      { label: 'Sisa', value: (r) => Math.max(0, (Number(r.monthly_loss) || 0) - (Number(r.saved) || 0)) },
+      { label: 'Tindakan', value: (r) => r.action || '' },
+      { label: 'Pemilik', value: (r) => r.owner || '' },
+      { label: 'Status', value: (r) => statusLabel(r.status) },
+      { label: 'Dibuat', value: (r) => r.created_at || '' },
+    ], rows))
+    showToast(`${rows.length} temuan diekspor ke CSV.`, 'success')
+  }
+
+  function drawActions() {
+    const search = el('input', {
+      type: 'search',
+      className: 'pd-search',
+      value: entryQuery,
+      placeholder: 'Cari temuan, tindakan, atau pemilik…',
+      'aria-label': 'Cari temuan pemborosan',
+    })
+    search.addEventListener('input', debounce(() => { entryQuery = search.value; refreshEntries() }, 150))
+
+    const streamFilter = el('select', { className: 'pd-filter', 'aria-label': 'Saring sumber pemborosan' },
+      [{ value: 'all', label: 'Semua sumber' }, ...WASTE_STREAMS.map((s) => ({ value: s.key, label: s.short }))]
+        .map((o) => el('option', { value: o.value }, o.label)))
+    streamFilter.value = entryStream
+    streamFilter.addEventListener('change', () => { entryStream = streamFilter.value; refreshEntries() })
+
+    const statusFilter = el('select', { className: 'pd-filter', 'aria-label': 'Saring status temuan' },
+      [{ value: 'all', label: 'Semua status' }, ...WASTE_STATUSES].map((o) => el('option', { value: o.value }, o.label)))
+    statusFilter.value = entryStatus
+    statusFilter.addEventListener('change', () => { entryStatus = statusFilter.value; refreshEntries() })
+
+    entryNote = el('span', { className: 'zw-toolbar-note' })
     const toolbar = el('div', { className: 'zw-toolbar' },
       C.button({ label: 'Catat temuan', icon: 'plus', variant: 'primary', size: 'sm', onClick: () => openEditor(null) }),
       C.button({ label: 'Impor massal', icon: 'layers', size: 'sm', onClick: openBulk }),
-      el('span', { className: 'zw-toolbar-note' }, `${entries.length} temuan · ${w.open} terbuka · ${C.rupiah(w.winnable)} bisa dihemat`),
+      el('div', { className: 'pd-filters' }, search, streamFilter, statusFilter),
+      C.button({ label: 'Ekspor CSV', icon: 'file', size: 'sm', variant: 'ghost', onClick: exportEntries }),
+      entryNote,
     )
 
-    const body = entries.length
-      ? C.dataTable({
-        caption: 'Temuan pemborosan dan tindakannya',
-        columns: [
-          { key: 'title', label: 'Temuan', render: (r) => C.cellStack(r.title, el('span', { className: 'zw-clamp' }, r.detail || streamMeta(r.stream).label)) },
-          { key: 'stream', label: 'Sumber', render: (r) => streamMeta(r.stream).short },
-          { key: 'monthly_loss', label: 'Kerugian/bln', align: 'right', render: (r) => C.rupiah(r.monthly_loss) },
-          { key: 'saved', label: 'Terhenti', align: 'right', render: (r) => C.rupiah(r.saved) },
-          {
-            key: 'remaining', label: 'Sisa', align: 'right',
-            render: (r) => {
-              const left = Math.max(0, (Number(r.monthly_loss) || 0) - (Number(r.saved) || 0))
-              return el('strong', { className: `tnum ${left > 0 ? 'zw-left' : ''}` }, C.rupiah(left))
-            },
-          },
-          { key: 'owner', label: 'Pemilik', render: (r) => r.owner || el('span', { className: 'muted' }, '—') },
-          { key: 'status', label: 'Status', render: (r) => C.tag(statusLabel(r.status), STATUS_TONE[r.status] || 'neutral') },
-          {
-            key: 'act', label: '', className: 'zw-row-actions',
-            render: (r) => el('div', { className: 'zw-row-actions-in' },
-              r.status !== 'done'
-                ? C.iconButton({ iconName: 'check', label: `Tandai selesai: ${r.title}`, onClick: () => markDone(r) })
-                : null,
-              C.iconButton({ iconName: 'pencil', label: `Ubah ${r.title}`, onClick: () => openEditor(r) }),
-              C.iconButton({ iconName: 'trash', label: `Hapus ${r.title}`, onClick: () => confirmDelete(r) })),
-          },
-        ],
-        rows: entries,
-      })
-      : C.emptyState({
+    if (!entries.length) {
+      entryList = null
+      host.replaceChildren(toolbar, C.emptyState({
         kicker: 'Belum ada temuan',
         title: 'Mulai dari kebocoran yang paling Anda rasakan',
         body: 'Contoh: teknisi menunggu bahan 45 menit per pekerjaan, atau kunjungan ulang karena noda tidak hilang. Setiap temuan butuh angka kerugian per bulan.',
         iconName: 'sprout',
         action: C.button({ label: 'Catat temuan pertama', icon: 'plus', variant: 'primary', onClick: () => openEditor(null) }),
-      })
+      }))
+      entryNote.textContent = '0 temuan'
+      return
+    }
 
-    host.replaceChildren(toolbar, body)
+    entryList = C.paginate({
+      key: 'zw-tindakan',
+      label: 'temuan pemborosan',
+      pageSize: 10,
+      render: (rows) => (rows.length
+        ? entryTable(rows)
+        : el('p', { className: 'pd-none' }, 'Tidak ada temuan yang cocok. Ubah kata kunci atau saringan.')),
+    })
+    host.replaceChildren(toolbar, entryList.root)
+    refreshEntries()
   }
 
   /* ------------------------------------------------------------ Optimasi */
@@ -330,7 +406,7 @@ export async function render(container, ctx = {}) {
         action.wrap,
         owner.wrap,
       ],
-      actions: [C.button({ label: 'Batal', variant: 'ghost' }), saveBtn],
+      actions: [C.button({ label: 'Batal', variant: 'ghost', dismiss: true }), saveBtn],
       opener: container,
     })
 
@@ -371,7 +447,7 @@ export async function render(container, ctx = {}) {
       title: 'Hapus temuan?',
       description: `"${entry.title}" akan dihapus dan tidak lagi dihitung dalam target bebas limbah.`,
       children: [el('p', { className: 'zw-muted' }, 'Tindakan ini tidak bisa dibatalkan.')],
-      actions: [C.button({ label: 'Batal', variant: 'ghost' }), delBtn],
+      actions: [C.button({ label: 'Batal', variant: 'ghost', dismiss: true }), delBtn],
       opener: container,
     })
     delBtn.addEventListener('click', async (e) => {
@@ -395,11 +471,23 @@ export async function render(container, ctx = {}) {
       placeholder: 'perjalanan | Rute tidak diurutkan antar kecamatan | 900000 | 0 | Tim Operasional | open\nbahan | Dosis kimia berlebih pada kolam kecil | 400000 | 150000 | Tim Operasional | progress',
     })
     const preview = el('div', { className: 'zw-bulk-preview' })
+    const skip = el('input', { type: 'checkbox', id: 'zw-bulk-skip', checked: skipDuplicates })
+    skip.addEventListener('change', () => { skipDuplicates = skip.checked; check() })
+    const skipWrap = el('label', { className: 'pd-check', for: 'zw-bulk-skip' },
+      skip, el('span', {}, 'Lewati temuan dengan judul yang sudah ada'))
+
+    const split = () => {
+      const rows = parseBulk(ta.input.value)
+      return { rows, ...splitDuplicates(rows, entries, (r) => wasteKey(r.title)) }
+    }
+
     const check = () => {
       try {
-        const rows = parseBulk(ta.input.value)
+        const { fresh, duplicates } = split()
         preview.className = 'zw-bulk-preview is-ok'
-        preview.textContent = `${rows.length} temuan siap diimpor. Contoh: ${rows[0].title} — ${C.rupiah(rows[0].monthly_loss)}`
+        const extra = duplicates.length ? ` · ${duplicates.length} sudah ada${skip.checked ? ' dan dilewati' : ''}` : ''
+        const sample = fresh[0] || duplicates[0]
+        preview.textContent = `${fresh.length} temuan baru${extra}. Contoh: ${sample?.title} — ${C.rupiah(sample?.monthly_loss || 0)}`
       } catch (err) {
         preview.className = 'zw-bulk-preview is-bad'
         preview.textContent = err.message
@@ -413,22 +501,25 @@ export async function render(container, ctx = {}) {
       title: 'Impor massal temuan',
       description: 'Tempel dari spreadsheet. Seluruh baris ditolak bila ada satu yang tidak valid, supaya hitungan tidak setengah jadi.',
       wide: true,
-      children: [modalNote, ta.wrap, preview],
-      actions: [C.button({ label: 'Batal', variant: 'ghost' }), importBtn],
+      children: [modalNote, ta.wrap, skipWrap, preview],
+      actions: [C.button({ label: 'Batal', variant: 'ghost', dismiss: true }), importBtn],
       opener: container,
     })
 
     importBtn.addEventListener('click', async (e) => {
       e.preventDefault()
       modalNote.hide()
-      let rows
-      try { rows = parseBulk(ta.input.value) } catch (err) { modalNote.show('warn', err.message); return }
+      let plan
+      try { plan = split() } catch (err) { modalNote.show('warn', err.message); return }
+      const rows = skip.checked ? plan.fresh : plan.rows
+      const skipped = plan.rows.length - rows.length
+      if (!rows.length) { modalNote.show('warn', 'Semua temuan sudah ada. Tidak ada yang diimpor.'); return }
       const restore = C.setBusy(importBtn, 'Mengimpor…')
       try {
         const { error } = await getCloud().database.from('waste_entries').insert(rows)
         if (error) throw new Error(error.message)
         dialog.close()
-        showToast(`${rows.length} temuan diimpor.`, 'success')
+        showToast(`${rows.length} temuan diimpor${skipped ? `, ${skipped} dilewati` : ''}.`, 'success')
         notifyDataChanged()
         await reload()
       } catch (err) { modalNote.show('danger', err.message) } finally { restore() }
@@ -436,6 +527,17 @@ export async function render(container, ctx = {}) {
   }
 
   /* ----------------------------------------------------------------- Load */
+
+  /** Load failure with a retry that does not force a full page reload. */
+  function errorView(message) {
+    const box = C.errorState(message)
+    const retry = C.button({
+      label: 'Coba lagi', icon: 'refresh', size: 'sm',
+      onClick: () => { host.replaceChildren(C.skeletonRows(4)); reload() },
+    })
+    box.querySelector('.note-body')?.appendChild(el('div', { className: 'note-actions' }, retry))
+    return box
+  }
 
   async function reload() {
     try {
@@ -445,7 +547,7 @@ export async function render(container, ctx = {}) {
     } catch (err) {
       if (ctx.signal?.aborted) return
       status.show('danger', `Gagal memuat data: ${err.message}`)
-      host.replaceChildren(C.errorState(err.message))
+      host.replaceChildren(errorView(err.message))
       return
     }
     if (ctx.signal?.aborted) return
@@ -466,25 +568,25 @@ const STREAM_ALIASES = {
   air_kimia: 'air_kimia', kimia: 'air_kimia', air: 'air_kimia',
 }
 
+/** One row through the shared validator, with a readable line number on failure. */
 function normalizeRow(r, lineNo) {
   const clean = (v) => String(v ?? '').trim().replace(/^["']|["']$/g, '')
-  const title = clean(r.title ?? r.judul)
-  if (!title) throw new Error(`Baris ${lineNo}: judul temuan wajib diisi.`)
-  const loss = Number(String(r.monthly_loss ?? r.kerugian ?? '').replace(/[^\d]/g, ''))
-  if (!(loss > 0)) throw new Error(`Baris ${lineNo}: kerugian per bulan harus lebih dari nol.`)
   const streamRaw = clean(r.stream ?? r.sumber).toLowerCase().replace(/\s+/g, '_')
-  const stream = STREAM_ALIASES[streamRaw] || 'waktu'
-  const savedRaw = Number(String(r.saved ?? r.terhenti ?? 0).replace(/[^\d]/g, '')) || 0
-  const statusRaw = clean(r.status ?? 'open').toLowerCase()
-  return {
-    stream,
-    title,
-    detail: clean(r.detail ?? r.keterangan) || null,
-    monthly_loss: loss,
-    saved: Math.min(loss, savedRaw),
-    action: clean(r.action ?? r.tindakan) || null,
-    owner: clean(r.owner ?? r.pemilik) || null,
-    status: ['open', 'progress', 'done'].includes(statusRaw) ? statusRaw : 'open',
+  try {
+    const row = withWasteCompletion(validateWasteEntry({
+      stream: STREAM_ALIASES[streamRaw] || 'waktu',
+      title: clean(r.title ?? r.judul),
+      detail: clean(r.detail ?? r.keterangan),
+      monthly_loss: r.monthly_loss ?? r.kerugian,
+      saved: r.saved ?? r.terhenti ?? 0,
+      action: clean(r.action ?? r.tindakan),
+      owner: clean(r.owner ?? r.pemilik),
+      status: clean(r.status) || 'open',
+    }))
+    assertWasteInvariants(row)
+    return row
+  } catch (err) {
+    throw new Error(`Baris ${lineNo}: ${err.message}`)
   }
 }
 
@@ -495,9 +597,11 @@ function parseBulk(text) {
     let rows
     try { rows = JSON.parse(raw) } catch { throw new Error('JSON tidak valid. Periksa koma dan tanda kutip.') }
     if (!Array.isArray(rows)) throw new Error('JSON harus berupa daftar temuan.')
-    return rows.map((r, i) => normalizeRow(r, i + 1))
+    const parsed = rows.map((r, i) => normalizeRow(r, i + 1))
+    assertImportSize(parsed.length)
+    return parsed
   }
-  return raw.split('\n')
+  const rows = raw.split('\n')
     .map((line, i) => ({ line: line.trim(), i: i + 1 }))
     .filter(({ line }) => line && !line.startsWith('#'))
     .map(({ line, i }) => {
@@ -506,4 +610,6 @@ function parseBulk(text) {
         stream: p[0], title: p[1], monthly_loss: p[2], saved: p[3], owner: p[4], status: p[5],
       }, i)
     })
+  assertImportSize(rows.length)
+  return rows
 }

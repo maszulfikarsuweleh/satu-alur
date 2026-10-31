@@ -4,6 +4,9 @@
  * (VITE_USE_MOCK=true); production talks to the Worker + D1.
  */
 import { isBlocked, isStaffEmail, SUSPENDED_MESSAGE, AUTH_NOTICE_KEY } from '../customers/rules.js'
+import {
+  validateVasItem, validateWasteEntry, withWasteCompletion, assertWasteInvariants, LIMITS,
+} from '../pendapatan/rules.js'
 
 const STORAGE_KEY = 'satualur_mock_v1'
 const OTP_STORE = 'satualur_mock_otp'
@@ -25,6 +28,21 @@ function ensureTable(name) {
 // Mirrors assertFlowRules in worker/index.js so tests catch the same mistakes.
 const LEDGER_CATEGORIES = ['pendapatan', 'biaya_tenaga', 'biaya_bahan', 'biaya_transport', 'biaya_lain']
 function flowRuleError(table, rows) {
+  // Pendapatan tables: same validators the Worker runs (src/pendapatan/rules.js),
+  // plus the per-owner ceiling. Returns the message instead of throwing.
+  if (table === 'vas_items' || table === 'waste_entries') {
+    try {
+      const existing = ensureTable(table).length
+      const cap = table === 'vas_items' ? LIMITS.items : LIMITS.findings
+      if (existing + rows.length > cap) return `Batas ${cap} ${table === 'vas_items' ? 'item katalog' : 'temuan'} tercapai (${existing} tersimpan). Hapus yang tidak terpakai lebih dulu.`
+      for (const r of rows) {
+        const clean = table === 'vas_items' ? validateVasItem(r) : withWasteCompletion(validateWasteEntry(r))
+        if (table === 'waste_entries') assertWasteInvariants(clean)
+        Object.assign(r, clean)
+      }
+      return null
+    } catch (err) { return err.message }
+  }
   if (table === 'ledger_entries') {
     const revenueFor = new Set()
     for (const r of rows) {
@@ -286,6 +304,8 @@ const mockDatabase = {
           id: Date.now() + Math.floor(Math.random() * 100000),
           owner_id: _session?.user?.id ?? 'anon',
           created_at: new Date().toISOString(),
+          // D1 fills this from the column default; the mock has to do it here.
+          ...(table === 'vas_items' || table === 'waste_entries' ? { updated_at: new Date().toISOString() } : {}),
           ...item,
         }))
         ensureTable(table).push(...created)
@@ -298,18 +318,33 @@ const mockDatabase = {
       if (builder._update) {
         const bad = ['id', 'owner_id'].find((c) => c in builder._update)
         if (bad) return resolve({ data: null, error: { message: `Kolom tidak boleh diubah: ${bad}` } })
+        const matches = (row) => filters.every(f => (f.op === 'eq' ? row[f.col] == f.val : true))
+        const targets = ensureTable(table).filter(matches)
+        let patch = builder._update
+        if (table === 'vas_items' || table === 'waste_entries') {
+          try {
+            patch = {
+              ...patch,
+              ...(table === 'vas_items' ? validateVasItem(patch, { partial: true }) : validateWasteEntry(patch, { partial: true })),
+              updated_at: new Date().toISOString(),
+            }
+            if (table === 'waste_entries') {
+              if (!filters.some((f) => f.op === 'eq' && f.col === 'id' && Number.isSafeInteger(Number(f.val)) && Number(f.val) > 0)) {
+                throw new Error('Update temuan memerlukan filter id tunggal.')
+              }
+              for (const row of targets) {
+                const merged = 'status' in patch || 'monthly_loss' in patch
+                  ? withWasteCompletion({ ...row, ...patch }) : { ...row, ...patch }
+                assertWasteInvariants(merged)
+                if ('status' in patch || 'monthly_loss' in patch) patch.saved = merged.saved
+              }
+            }
+          } catch (err) { return resolve({ data: null, error: { message: err.message } }) }
+        }
         let affected = 0
-        ensureTable(table).forEach((row, i) => {
-          if (filters.every(f => {
-            if (f.op === 'eq') return row[f.col] == f.val
-            return true
-          })) {
-            Object.assign(row, builder._update)
-            affected++
-          }
-        })
+        for (const row of targets) { Object.assign(row, patch); affected++ }
         persist()
-        return resolve({ data: affected > 0 ? [builder._update] : [], error: null })
+        return resolve({ data: affected > 0 ? [patch] : [], error: null })
       }
       if (builder._delete) {
         const before = ensureTable(table).length
@@ -1154,7 +1189,9 @@ const SEED_WASTE = [
 ]
 
 function addSeedVas(state, daysAgo) {
-  state.vas_items = SEED_VAS.map(({ age, ...v }, i) => ({ id: 8001 + i, owner_id: 'anon', ...v, created_at: daysAgo(age) }))
+  state.vas_items = SEED_VAS.map(({ age, ...v }, i) => ({
+    id: 8001 + i, owner_id: 'anon', ...v, created_at: daysAgo(age), updated_at: daysAgo(age),
+  }))
   // Two past jobs already carried a VAS line, so the baseline share is not zero:
   // 5004 cuci sofa + anti-bakteri coating, 5007 perawatan kolam + kontrak bulanan.
   const carried = { 5004: 8004, 5007: 8005 }
@@ -1164,7 +1201,9 @@ function addSeedVas(state, daysAgo) {
 }
 
 function addSeedWaste(state, daysAgo) {
-  state.waste_entries = SEED_WASTE.map(({ age, ...w }, i) => ({ id: 9001 + i, owner_id: 'anon', ...w, created_at: daysAgo(age) }))
+  state.waste_entries = SEED_WASTE.map(({ age, ...w }, i) => ({
+    id: 9001 + i, owner_id: 'anon', ...w, created_at: daysAgo(age), updated_at: daysAgo(age),
+  }))
 }
 
 function addSeedWorkers(state, daysAgo) {
