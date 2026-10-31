@@ -38,7 +38,7 @@ E2E hanya berjalan di mode mock. Jangan arahkan ke produksi karena alurnya menul
 
 | ID | Judul | Prasyarat | Langkah | Data uji | Hasil yang diharapkan | Prioritas | Otomatis? | Status | Catatan |
 |----|-------|-----------|---------|----------|-----------------------|-----------|-----------|--------|---------|
-| TC-LND-01 | Semua bagian tampil | ENV-MOCK/PROD, belum masuk | Buka `/`, gulir dari atas ke bawah | - | Hero, ticker, Alur kerja (`#alur`), Fitur AI (`#fitur-ai`), Ide besar (`#ide-besar`), Harga (`#harga`), FAQ (`#faq`), CTA penutup, dan footer tampil tanpa error | P1 | [landing](../../tests/e2e/landing.spec.cjs) | _PENDING_ | |
+| TC-LND-01 | Semua bagian tampil | ENV-MOCK/PROD, belum masuk | Buka `/`, gulir dari atas ke bawah | - | Hero, ticker, Alur kerja (`#alur`), Pendapatan (`#pendapatan`), Pertumbuhan (`#pertumbuhan`), Fitur AI (`#fitur-ai`), Ide besar (`#ide-besar`), Harga (`#harga`), FAQ (`#faq`), CTA penutup, dan footer tampil tanpa error | P1 | [landing](../../tests/e2e/landing.spec.cjs) | _PENDING_ | |
 | TC-LND-02 | Navigasi anchor menjaga hash router | sama | Klik menu "Harga" di header | - | Halaman menggulir ke Harga. URL tetap `#/` (tidak menjadi `#harga`). Tautan menu "Harga" aktif. | P2 | [landing](../../tests/e2e/landing.spec.cjs) | _PENDING_ | |
 | TC-LND-03 | Paket harga | sama | Lihat bagian Harga | - | Tiga paket: Sole Trader, UKM, Enterprise. Harga sesuai draf terbaru (angka harga belum final) | P2 | [landing](../../tests/e2e/landing.spec.cjs) (nama paket) | _PENDING_ | Cocokkan angka dengan keputusan bisnis |
 | TC-LND-04 | FAQ buka/tutup | sama | Klik pertanyaan FAQ pertama, lalu klik lagi | - | Jawaban terbuka lalu tertutup, `aria-expanded` berganti true/false | P3 | [landing](../../tests/e2e/landing.spec.cjs) | _PENDING_ | |
@@ -48,6 +48,8 @@ E2E hanya berjalan di mode mock. Jangan arahkan ke produksi karena alurnya menul
 | TC-LND-08 | CTA ke login | sama | Klik "Masuk", lalu "Kembali ke beranda" | - | Halaman pindah ke `#/masuk`. Kembali ke landing tanpa elemen ganda | P1 | [landing](../../tests/e2e/landing.spec.cjs) | _PENDING_ | |
 | TC-LND-09 | Sudah masuk: CTA berubah | sudah masuk | Buka `#/` | - | Tombol berbunyi "Buka Dashboard" dan menuju `#/app` | P3 | Manual | _PENDING_ | |
 | TC-LND-10 | Demo agen AI dan animasi 3D | desktop | Gulir ke Fitur AI. Ulangi dengan "kurangi gerakan" OS aktif | - | Demo agen "mengetik". Dengan reduced motion, animasi berhenti atau statis tanpa error. Tanpa WebGL tampil gambar pengganti | P3 | Manual | _PENDING_ | |
+| TC-LND-11 | Bagian Pendapatan | sama | Gulir ke bagian Pendapatan | - | Dua kartu mesin pendapatan (Layanan tambahan dengan katalog add-on dan batang serapan; Tanpa limbah dengan cincin persentase dan tiga kebocoran terbesar), lalu strip ruang optimasi dengan lima chip tim dan "Pimpinan optimasi". Semua angka contoh diberi label "Contoh" | P1 | [landing](../../tests/e2e/landing.spec.cjs) | _PENDING_ | Angka di pratinjau ilustratif, bukan data pelanggan |
+| TC-LND-12 | Bagian Pertumbuhan | sama | Gulir ke bagian Pertumbuhan | - | Empat kartu menu (Radar peluang, Rekomendasi & prediksi, Pencari prospek, Media Sosial) dan dua kartu pendamping (Penasihat AI, AI Superpowers), plus catatan bahwa Media Sosial memerlukan Halaman Facebook dan Instagram Bisnis | P1 | [landing](../../tests/e2e/landing.spec.cjs) | _PENDING_ | |
 
 ## 3. Login mode Live (email + OTP)
 

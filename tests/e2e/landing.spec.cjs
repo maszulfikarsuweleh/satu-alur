@@ -6,10 +6,31 @@ module.exports = async function landing(t) {
   await p.goto(`${t.base}/#/`, { waitUntil: 'load' })
   await p.waitForSelector('.lp-hero')
   t.check(await p.evaluate(() => document.body.dataset.page) === 'landing', 'body[data-page=landing]')
-  for (const id of ['alur', 'fitur-ai', 'ide-besar', 'harga', 'faq']) {
+  for (const id of ['alur', 'pendapatan', 'pertumbuhan', 'fitur-ai', 'ide-besar', 'harga', 'faq']) {
     t.check(await p.locator(`#${id}`).count() === 1, `section #${id} present`)
   }
   t.check(await p.locator('.lp-cta-wrap').count() === 1, 'closing CTA section present')
+
+  /* ---------------- Pendapatan: the two money engines ---------------- */
+  t.check(await p.locator('.lp-nav a[data-nav="pendapatan"]').count() === 1, 'nav: Pendapatan link')
+  t.check(await p.locator('.lp-nav a[data-nav="pertumbuhan"]').count() === 1, 'nav: Pertumbuhan link')
+  t.check(await p.locator('#pendapatan .lp-inc-engine').count() === 2, 'pendapatan: two engine cards')
+  const incText = await p.textContent('#pendapatan')
+  t.check(/Layanan tambahan/.test(incText) && /Tanpa limbah/.test(incText), 'pendapatan: both menus named')
+  t.check(await p.locator('#pendapatan .lp-vas-rows li').count() === 3, 'pendapatan: add-on preview rows')
+  t.check(await p.locator('#pendapatan .lp-zw-ring').count() === 1, 'pendapatan: waste-free ring')
+  t.check(await p.locator('#pendapatan .lp-inc-teams li').count() === 5, 'pendapatan: five AI teams')
+  t.check(/Pimpinan optimasi/.test(incText), 'pendapatan: lead synthesis named')
+
+  /* ---------------- Pertumbuhan: the growth menus ---------------- */
+  t.check(await p.locator('#pertumbuhan .lp-grow-card').count() === 4, 'pertumbuhan: four menu cards')
+  t.check(await p.locator('#pertumbuhan .lp-grow-assist').count() === 2, 'pertumbuhan: two assistant cards')
+  const growText = await p.textContent('#pertumbuhan')
+  for (const label of ['Radar peluang', 'Pencari prospek', 'Media Sosial', 'Penasihat AI', 'AI Superpowers']) {
+    t.check(growText.includes(label), `pertumbuhan: ${label} described`)
+  }
+  t.check(await p.locator('#pertumbuhan .lp-grow-leads li').count() === 2, 'pertumbuhan: lead preview rows')
+
   const pricing = await p.textContent('#harga')
   t.check(/Sole Trader/.test(pricing) && /UKM/.test(pricing) && /Enterprise/.test(pricing), 'pricing shows Sole Trader, UKM, Enterprise')
 
@@ -20,6 +41,13 @@ module.exports = async function landing(t) {
   t.check(afterAnchor.hash === '#/' || afterAnchor.hash === '', 'anchor click keeps hash on the landing route', afterAnchor.hash)
   t.check(afterAnchor.y > 500 && Math.abs(afterAnchor.top) < 160, 'anchor click scrolls #harga to the top', JSON.stringify(afterAnchor))
   t.check(await p.locator('.lp-nav a[data-nav="harga"].is-active').count() === 1, 'active nav link follows the section')
+
+  // the new sections are reachable from the nav and mark themselves active
+  await p.click('.lp-nav a[data-scroll="pendapatan"]')
+  await p.waitForTimeout(1400)
+  const incTop = await p.evaluate(() => Math.round(document.getElementById('pendapatan').getBoundingClientRect().top))
+  t.check(Math.abs(incTop) < 200, 'anchor click scrolls #pendapatan into view', incTop)
+  t.check(await p.locator('.lp-nav a[data-nav="pendapatan"].is-active').count() === 1, 'Pendapatan nav link becomes active')
 
   // FAQ accordion
   await p.click('.lp-nav a[data-scroll="faq"]')
