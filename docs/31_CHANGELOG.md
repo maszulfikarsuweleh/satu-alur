@@ -1,12 +1,42 @@
 # Changelog
 
 > Status: Draft
-> Terakhir diperbarui: 2026-10-29
+> Terakhir diperbarui: 2026-10-31
 > Pemilik: _TBD_
 
 Format mengikuti [Keep a Changelog](https://keepachangelog.com/id-ID/1.1.0/). Versi mengikuti `package.json` (saat ini `0.1.0`); penetapan nomor versi rilis: _TBD_.
 
 ## [Unreleased]
+
+### 2026-10-31 - Persistensi dan validasi produksi Pendapatan
+
+Dua menu Pendapatan (**Layanan Tambahan** dan **Tanpa Limbah**) sebelumnya hanya UI di atas mock tanpa tabel D1, tanpa validasi server, dan tanpa pencarian. Perubahan ini menambahkan penyimpanan D1 dan validasi server untuk keduanya.
+
+#### Ditambahkan
+- Migrasi `0008_pendapatan.sql`: tabel `vas_items` dan `waste_entries` dengan CHECK constraint yang mencerminkan aturan aplikasi (`saved <= monthly_loss`, enum kategori/aliran/status, batas uang), indeks `(owner_id, created_at)` dan `(owner_id, stream)`, serta kolom `ledger_entries.vas_item_id`.
+- `src/pendapatan/rules.js`: satu sumber aturan untuk formulir, Worker, dan mock — enum, batas panjang, batas uang, `validateVasItem`, `validateWasteEntry`, `assertWasteInvariants`, `withWasteCompletion`, `splitDuplicates`, `assertImportSize`. Galat membawa `validation: true` sehingga Worker memetakannya ke 400, bukan 500.
+- Worker `/api/db`: `vas_items` dan `waste_entries` masuk whitelist; insert **dan** update divalidasi (update terhadap baris hasil gabungan), kuota 500 item katalog dan 2000 temuan per pemilik, `updated_at` diisi server. `assertFlowRules` diekspor untuk pengujian kontrak.
+- Pencarian (dengan debounce), filter status/aliran, paginasi, dan ekspor CSV di tab Katalog (VAS) dan Tindakan (Tanpa Limbah).
+- Impor massal sadar duplikat: kotak "Lewati item yang sudah ada" dengan pratinjau `N item baru · M sudah ada dan dilewati`; baris duplikat dilewati, bukan digandakan.
+- Tombol "Coba lagi" pada keadaan galat di kedua tahap; data yang gagal dimuat tidak lagi menjadi layar kosong.
+- Pembukuan: pemilih add-on opsional (`vas_item_id`) untuk baris pendapatan, sehingga "Porsi VAS" di dasbor diukur dari data, bukan diasumsikan.
+
+#### Diperbaiki
+- `C.button` mendapat opsi `dismiss`, dan `C.modal` menutup dialog ketika tombol "Batal" diklik. Sebelumnya tombol dirender `type="button"` di dalam form `method="dialog"` sehingga batal tidak melakukan apa pun. Handler tingkat dialog yang memanggil `preventDefault()` (konfirmasi form kotor) tetap menang.
+- `percentInt` mengembalikan `NaN` untuk teks non-numerik, sehingga `"abc"` ditolak alih-alih diam-diam menjadi 0.
+- Kolom UPDATE SQL disusun sesudah normalisasi menambahkan `saved`/`updated_at`, agar jumlah parameter tetap sesuai. Update temuan dibatasi ke satu `id`; constraint database juga menjaga temuan selesai selalu terhenti penuh.
+- Format uang negatif tidak lagi diubah menjadi positif; CSV melindungi teks yang bisa dibaca sebagai formula spreadsheet.
+- Riwayat dan proses optimasi dipisahkan per pengguna; riwayat lama tanpa pemilik tidak ditampilkan.
+
+#### Pengujian
+- Total 368 tes Node lulus, termasuk pengujian Worker melalui HTTP dengan SQLite asli setelah seluruh migrasi: UPDATE, isolasi pemilik, referensi VAS, dan invarian penghematan. Pengujian SQLite membutuhkan Node 22.13+; versi lama melewatinya.
+- Seluruh 44 pemeriksaan browser `pendapatan` lulus pada server Vite dengan backend mock, termasuk pemisahan riwayat akun dan pemilih VAS pembukuan. Build produksi berhasil dengan peringatan ukuran bundel. Seluruh sembilan migrasi berhasil pada D1 lokal terisolasi.
+- Dua kegagalan `flow` pada tahap Penugasan muncul identik pada commit PR sebelumnya (`1773d9f`) dan perubahan ini; kegagalan tersebut mendahului perubahan ini. Suite browser lengkap tidak dijalankan ulang.
+
+#### Catatan
+- Tabel baru butuh `npm run db:migrate:local` / `db:migrate:remote`; tanpa itu `/api/db` mengembalikan galat SQL untuk kedua tabel.
+- Jalankan migrasi remote sebelum men-deploy Worker/frontend; database produksi dan layanan AI langsung belum diuji dalam pemeriksaan ini.
+- Batas 100 baris per `insert` tetap berlaku; tempelan lebih besar ditolak dan perlu dibagi menjadi beberapa impor.
 
 ### 2026-10-29 - Publikasi Meta dan Kantor Satu Alur
 

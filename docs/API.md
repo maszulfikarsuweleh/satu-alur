@@ -98,7 +98,7 @@ Respons 200: `{ "data": null, "error": null }`. Token tidak berlaku lagi.
 
 ## Database: POST /api/db
 
-Satu endpoint untuk semua tabel domain: `requests`, `offers`, `assignments`, `completions`, `ledger_entries`, `reports`. Baris selalu dibatasi ke pengguna login (`owner_id`); jangan mengirim `owner_id`.
+Satu endpoint untuk semua tabel domain: `requests`, `offers`, `assignments`, `workers`, `assignment_workers`, `completions`, `ledger_entries`, `vas_items`, `waste_entries`, `reports`, `social_contents`, `social_schedules`, `ai_messages`, `opportunity_states`, `leads`. Baris selalu dibatasi ke pengguna login (`owner_id`); jangan mengirim `owner_id`. `social_posts` hanya boleh dibaca; `social_accounts` dan `social_oauth_picks` tidak ada di whitelist.
 
 Field request:
 
@@ -165,6 +165,40 @@ Respons: array baris yang terdampak.
 
 Respons: `{ "data": null, "error": null, "count": 12 }`.
 
+### Aturan Tabel Pendapatan (`vas_items`, `waste_entries`)
+
+Kedua tabel divalidasi oleh `src/pendapatan/rules.js` — modul yang sama yang dipakai formulir dan mock cloud, sehingga UI tidak bisa menerima baris yang akan ditolak server, dan sebaliknya. Pelanggaran mengembalikan **400** dengan pesan berbahasa Indonesia yang siap ditampilkan.
+
+| Aturan | Berlaku pada | Pesan (400) |
+|--------|--------------|-------------|
+| `name` wajib, 2–80 karakter | `vas_items` insert/update | `Nama item wajib diisi.` · `Nama item minimal 2 karakter.` · `Nama item maksimal 80 karakter.` |
+| `category` dari enum | `vas_items` | `Kategori item tidak dikenal.` |
+| `price` > 0 dan ≤ Rp1.000.000.000 | `vas_items` | `Harga jual harus lebih dari nol.` · `Harga jual maksimal Rp1.000.000.000.` |
+| `cost` ≥ 0 dan ≤ Rp1.000.000.000 | `vas_items` | `Biaya langsung tidak boleh negatif.` |
+| `attach_rate` angka 0–100 | `vas_items` | `Tingkat pasang harus angka 0 sampai 100.` |
+| `status` dari enum | `vas_items` | `Status item tidak dikenal.` |
+| `title` wajib, 3–120 karakter | `waste_entries` | `Judul temuan wajib diisi.` · `Judul temuan minimal 3 karakter.` |
+| `stream` dari enum | `waste_entries` | `Sumber pemborosan tidak dikenal.` |
+| `monthly_loss` > 0 dan ≤ Rp1.000.000.000 | `waste_entries` | `Kerugian per bulan harus lebih dari nol.` |
+| `saved` ≥ 0 dan ≤ `monthly_loss` | `waste_entries` | `Nilai yang sudah dihentikan tidak boleh negatif.` · `Yang sudah dihentikan tidak boleh melebihi kerugian tercatat.` |
+| `status: 'done'` berarti `saved === monthly_loss` | `waste_entries` | `Temuan yang selesai harus dihitung terhenti penuh.` |
+| `status` dari enum | `waste_entries` | `Status temuan tidak dikenal.` |
+| Maks 500 item katalog per pemilik | `vas_items` insert | `Batas 500 item katalog tercapai (N tersimpan). Hapus yang tidak terpakai lebih dulu.` |
+| Maks 2000 temuan per pemilik | `waste_entries` insert | `Batas 2000 temuan tercapai (N tersimpan). Hapus yang tidak terpakai lebih dulu.` |
+
+Dua perilaku yang mudah disalahpahami:
+
+- **`attach_rate` di luar rentang dijepit, bukan ditolak** (`150` → `100`, `-5` → `0`). Nilai 0–1 dibaca sebagai pecahan (`0,25` = 25%), sesuai label kolom yang memakai persen. Hanya nilai yang bukan angka sama sekali yang gagal.
+- **Uang menerima format tempelan.** `moneyInt("Rp 450.000")` → `450000`; titik dibaca sebagai pemisah ribuan, bukan desimal.
+
+Catatan penting:
+
+- **Update divalidasi terhadap baris hasil gabungan.** `changes` hanya berisi kolom yang berubah, jadi invarian `saved <= monthly_loss` diperiksa pada baris tersimpan yang digabung dengan perubahan — bukan pada `changes` saja. Mengubah `monthly_loss` ke bawah `saved` ditolak; menandai `status: 'done'` otomatis menaikkan `saved` ke `monthly_loss`.
+- **Update `waste_entries` memerlukan filter `eq` pada satu `id`.** Setiap temuan memiliki kerugian berbeda; perubahan status harus memakai angka temuan itu sendiri. Update massal dengan filter aliran/status ditolak (400).
+- **`updated_at` diisi server.** Nilai dari klien diabaikan.
+- **`ledger_entries.vas_item_id`** opsional dan harus menunjuk `vas_items` milik pengguna yang sama (`Referensi vas_item_id tidak ditemukan.` bila bukan). `NULL` berarti pendapatan jasa biasa. Kolom ini yang membuat "Porsi VAS" di dasbor terukur, bukan perkiraan.
+- Batas 100 baris per `insert` tetap berlaku; UI menolak tempelan lebih dari 100 baris. Bagi berkas besar menjadi beberapa impor. Baris duplikat dapat dilewati (nama item untuk VAS, judul untuk temuan).
+
 ### Kesalahan Umum
 
 | Pesan | Penyebab |
@@ -175,6 +209,9 @@ Respons: `{ "data": null, "error": null, "count": 12 }`.
 | `Filter diperlukan untuk update/delete.` | Tidak ada filter |
 | `Kolom tidak boleh diubah: owner_id` | Mencoba mengubah `id`/`owner_id` |
 | `Referensi request_id tidak ditemukan.` | FK menunjuk baris yang bukan milik pengguna atau tidak ada |
+| `Batas 500 item katalog tercapai (…)` | Insert `vas_items` melebihi kuota per pemilik |
+| `Batas 2000 temuan tercapai (…)` | Insert `waste_entries` melebihi kuota per pemilik |
+| `Yang sudah dihentikan tidak boleh melebihi kerugian tercatat.` | `saved > monthly_loss` (insert maupun update) |
 | `Data tidak valid atau melanggar batasan.` | Constraint database (mis. kolom NOT NULL kosong) |
 
 ## LLM
