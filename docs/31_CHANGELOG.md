@@ -23,11 +23,13 @@ Landing sebelumnya hanya bercerita tentang enam tahap alur. Dua grup menu terbar
 - Statistik di bagian Alur kerja menjadi **6 tahap kerja · 5 tim AI · 2 grup tambahan**, dan paragrafnya menyebut bahwa dua grup menu memakai data alur untuk menambah pendapatan dan mencari pertumbuhan.
 - Hero: subjudul menyebut kedua mesin baru; poin di bawah CTA menambahkan "Pendapatan & pertumbuhan sudah aktif".
 - Kolom footer "Produk" menautkan kedua bagian baru.
+- Hero memakai sumber default yang sama dengan editor, sehingga subjudul baru benar-benar tampil. Klaim serapan VAS diperjelas sebagai perkiraan yang diatur pengguna; prediksi diberi keterangan data demonstrasi.
+- Angka dan jawaban ilustratif Pertumbuhan diberi label "Contoh"; persyaratan akun sosial menjelaskan Facebook, Instagram, dan Threads secara terpisah.
 
 #### Pengujian
-- `tests/e2e/landing.spec.cjs`: 53 pemeriksaan (dari 38), termasuk keberadaan kedua bagian, jumlah kartu, lima chip tim, baris pratinjau, dan navigasi anchor ke `#pendapatan`.
+- `tests/e2e/landing.spec.cjs`: 81 pemeriksaan (dari 38), termasuk keberadaan kedua bagian, jumlah kartu, lima chip tim, baris pratinjau, dan navigasi anchor ke `#pendapatan`.
 - Kasus UAT TC-LND-11 dan TC-LND-12 ditambahkan; TC-LND-01 diperbarui.
-- Diverifikasi di Chromium pada 1440, 1024, 960, dan 390 px, tema terang dan gelap: tanpa scroll horizontal, tanpa error konsol, navigasi tidak bertabrakan pada 960 px.
+- Total 368 tes Node dan 122 pemeriksaan browser landing/site lulus. Chromium menguji 1440, 1024, 960, 959, 390, dan 320 px pada tema terang/gelap, termasuk reduced motion, overflow, dan benturan navigasi. Build produksi berhasil dengan peringatan ukuran bundel.
 
 ### 2026-10-31 - Persistensi dan validasi produksi Pendapatan
 

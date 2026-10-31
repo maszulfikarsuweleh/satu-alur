@@ -19,7 +19,7 @@ import { getSite } from '../site/api.js'
 import { getPlans } from '../business/api.js'
 import { renderPlanCard } from '../business/plan-card.js'
 import { renderHero } from '../site/hero.js'
-import { NAV, HERO_POINTS, STAGES, TICKER, FEATURES, INCOME, GROWTH, ROADMAP, FAQS, AGENT_DEMO } from './content.js'
+import { NAV, HERO, HERO_POINTS, STAGES, TICKER, FEATURES, INCOME, GROWTH, ROADMAP, FAQS, AGENT_DEMO } from './content.js'
 
 const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]))
 const clamp01 = (v) => Math.min(1, Math.max(0, v))
@@ -109,9 +109,9 @@ function heroHTML(user) {
     <div class="lp-hero-glow" aria-hidden="true"></div>
     <div class="lp-container lp-hero-grid">
       <div class="lp-hero-copy">
-        <p class="lp-hero-badge reveal"><span class="pulse-dot" aria-hidden="true"></span>Untuk bisnis jasa di Indonesia · ditenagai AI</p>
-        <h1 class="display lp-hero-title reveal" style="--d: 80ms" id="lp-hero-title">Bisnis jasa Anda, <em>tumbuh</em> dalam satu&nbsp;alur.</h1>
-        <p class="lp-hero-sub reveal" style="--d: 160ms">Satu Alur menyatukan permintaan pelanggan, penawaran, penugasan, pembukuan, dan laporan dalam satu alur kerja. AI mengerjakan yang berulang; Anda fokus melayani dan bertumbuh.</p>
+        <p class="lp-hero-badge reveal"><span class="pulse-dot" aria-hidden="true"></span>${esc(HERO.badge)}</p>
+        <h1 class="display lp-hero-title reveal" style="--d: 80ms" id="lp-hero-title">${emHTML(HERO.title)}</h1>
+        <p class="lp-hero-sub reveal" style="--d: 160ms">${esc(HERO.subtitle)}</p>
         <div class="lp-hero-ctas reveal" style="--d: 240ms">
           ${primaryCta(user, { size: 'btn-lg' })}
           <a class="btn btn-lg btn-ghost lp-btn-quiet" href="#alur" data-scroll="alur">Lihat alur kerja ${iconHTML('chevronDown', { size: 18 })}</a>
@@ -372,6 +372,7 @@ function growthHTML() {
       <header class="lp-grow-head">
         <span class="lp-grow-icon">${iconHTML(c.icon, { size: 19, stroke: 1.9 })}</span>
         <h3 class="lp-grow-title">${esc(c.title)}</h3>
+        ${c.stat || c.leads || c.post ? '<span class="tag tag-accent">Contoh</span>' : ''}
       </header>
       <p class="lp-grow-desc">${esc(c.desc)}</p>
       ${growVisual(c)}
@@ -383,7 +384,7 @@ function growthHTML() {
         <h3 class="lp-grow-title">${esc(a.title)}</h3>
       </header>
       <p class="lp-grow-desc">${esc(a.desc)}</p>
-      ${a.sample ? `<p class="lp-grow-quote">${iconHTML('bot', { size: 14, stroke: 1.9 })}<span>${esc(a.sample)}</span></p>` : ''}
+      ${a.sample ? `<p class="lp-grow-quote">${iconHTML('bot', { size: 14, stroke: 1.9 })}<span><span class="tag tag-accent">Contoh</span> ${esc(a.sample)}</span></p>` : ''}
       ${a.tools ? `<ul class="lp-grow-tools">${a.tools.map((t) => `<li>${esc(t)}</li>`).join('')}</ul>` : ''}
     </article>`).join('')
   return `

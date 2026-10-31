@@ -6,6 +6,7 @@ module.exports = async function landing(t) {
   await p.goto(`${t.base}/#/`, { waitUntil: 'load' })
   await p.waitForSelector('.lp-hero')
   t.check(await p.evaluate(() => document.body.dataset.page) === 'landing', 'body[data-page=landing]')
+  t.check(/layanan tambahan/.test(await p.locator('.lp-hero-sub').textContent()), 'hero: updated default copy is rendered')
   for (const id of ['alur', 'pendapatan', 'pertumbuhan', 'fitur-ai', 'ide-besar', 'harga', 'faq']) {
     t.check(await p.locator(`#${id}`).count() === 1, `section #${id} present`)
   }
@@ -30,6 +31,8 @@ module.exports = async function landing(t) {
     t.check(growText.includes(label), `pertumbuhan: ${label} described`)
   }
   t.check(await p.locator('#pertumbuhan .lp-grow-leads li').count() === 2, 'pertumbuhan: lead preview rows')
+  t.check(await p.locator('#pertumbuhan .tag').count() === 4, 'pertumbuhan: all illustrative numbers and sample answers are labelled')
+  t.check(/data demonstrasi/.test(growText), 'pertumbuhan: predictions are identified as demo data')
 
   const pricing = await p.textContent('#harga')
   t.check(/Sole Trader/.test(pricing) && /UKM/.test(pricing) && /Enterprise/.test(pricing), 'pricing shows Sole Trader, UKM, Enterprise')
@@ -112,4 +115,30 @@ module.exports = async function landing(t) {
   t.check(mm.hidden && !mm.lock, 'mobile: menu link closes menu and unlocks scroll', JSON.stringify(mm))
   t.check(mm.y > 500 && (mm.hash === '#/' || mm.hash === ''), 'mobile: menu link scrolls and keeps hash', JSON.stringify(mm))
   await t.noErrors(m)
+
+  // Check both sides of the navigation breakpoint and the narrow card layout.
+  const responsive = await t.page({ reducedMotion: 'reduce' })
+  await responsive.goto(`${t.base}/#/`, { waitUntil: 'load' })
+  await responsive.waitForSelector('.lp-inc-engine')
+  for (const width of [1440, 1024, 960, 959, 390, 320]) {
+    await responsive.setViewportSize({ width, height: 900 })
+    for (const theme of ['light', 'dark']) {
+      const layout = await responsive.evaluate((theme) => {
+        document.documentElement.dataset.theme = theme
+        const rect = (selector) => document.querySelector(selector).getBoundingClientRect()
+        const nav = rect('.lp-nav')
+        const brand = rect('.lp-header .brand-link')
+        const actions = rect('.lp-header-actions')
+        return {
+          fits: document.documentElement.scrollWidth <= innerWidth,
+          navFits: innerWidth < 960 || (nav.left >= brand.right && nav.right <= actions.left),
+          visible: [...document.querySelectorAll('.lp-inc-engine, .lp-grow-card')].every((el) => getComputedStyle(el).opacity === '1'),
+          pulseDuration: parseFloat(getComputedStyle(document.querySelector('.lp-inc-teams li'), '::before').animationDuration),
+        }
+      }, theme)
+      t.check(layout.fits && layout.navFits, `${width}px ${theme}: content fits and header links do not overlap`, JSON.stringify(layout))
+      t.check(layout.visible && layout.pulseDuration < 0.001, `${width}px ${theme}: reduced motion keeps cards visible and suppresses team pulses`)
+    }
+  }
+  await t.noErrors(responsive)
 }

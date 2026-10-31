@@ -122,7 +122,7 @@ export const FEATURES = [
 export const INCOME = {
   eyebrow: 'Pendapatan',
   title: 'Pekerjaan yang sama, nilai yang *lebih*.',
-  lede: 'Dua menu yang mengubah data operasi menjadi uang: add-on yang dijual bersama pekerjaan yang sudah ada, dan pemborosan yang dihentikan satu per satu. Keduanya membaca data yang sudah Anda masukkan, jadi tidak ada isian baru.',
+  lede: 'Dua menu untuk menambah nilai pekerjaan: temukan peluang add-on dari data operasi, kelola katalognya, lalu catat pemborosan dan penghematan yang sudah Anda capai.',
   engines: [
     {
       id: 'vas',
@@ -132,7 +132,7 @@ export const INCOME = {
       desc: 'Satu Alur membaca jenis jasa yang paling sering Anda kerjakan, lalu menunjukkan add-on yang masuk akal untuk ditawarkan — dengan harga, biaya langsung, dan perkiraan serapan.',
       points: [
         'Katalog add-on dalam enam kategori',
-        'Serapan per item dihitung dari pekerjaan Anda',
+        'Atur perkiraan serapan untuk setiap item',
         'Porsi add-on terukur di jurnal, bukan dikira-kira',
       ],
       preview: {
@@ -154,7 +154,7 @@ export const INCOME = {
       points: [
         'Lima aliran pemborosan, semuanya dalam Rupiah',
         'Rencana penutupan diurutkan dari kebocoran terbesar',
-        'Menandai selesai mengunci angka yang benar-benar dihentikan',
+        'Tandai selesai setelah penghematan terkonfirmasi',
       ],
       preview: {
         title: 'Kebocoran bulan ini',
@@ -180,13 +180,13 @@ export const INCOME = {
 }
 
 /**
- * Pertumbuhan — five menus that use the flow's own data to find new work.
+ * Pertumbuhan — tools for finding new work, with labelled demo predictions.
  * The scores and Rupiah figures in the previews are illustrative.
  */
 export const GROWTH = {
   eyebrow: 'Pertumbuhan',
   title: 'Setelah rapi, giliran *bertumbuh*.',
-  lede: 'Lima menu yang memakai data alur Anda untuk mencari pelanggan baru, menaikkan nilai pelanggan lama, dan menjawab pertanyaan yang biasanya butuh konsultan.',
+  lede: 'Radar dan penasihat membaca data alur Anda. Pencari prospek membantu menemukan calon pelanggan, Media Sosial mengelola konten, dan contoh rekomendasi menunjukkan cara menilai peluang.',
   cards: [
     {
       id: 'radar',
@@ -203,7 +203,7 @@ export const GROWTH = {
       id: 'prediksi',
       icon: 'target',
       title: 'Rekomendasi & prediksi',
-      desc: 'Setiap peluang diberi skor, estimasi nilai, dan probabilitas berhasil, lalu diterjemahkan menjadi satu langkah yang bisa langsung Anda kerjakan.',
+      desc: 'Jelajahi contoh skor peluang, estimasi nilai, dan probabilitas berhasil. Bagian ini memakai data demonstrasi untuk memperlihatkan cara membaca rekomendasi.',
       stat: { score: 92, label: 'Skor peluang', rows: [['Estimasi nilai', 'Rp54 jt/bln'], ['Peluang berhasil', '78%']] },
     },
     {
@@ -220,7 +220,7 @@ export const GROWTH = {
       id: 'sosial',
       icon: 'megaphone',
       title: 'Media Sosial',
-      desc: 'Tulis konten dengan AI, jadwalkan tayang ke Facebook dan Instagram, lalu ajukan iklan atau kolaborasi ke tim Satu Alur dari halaman yang sama.',
+      desc: 'Tulis konten dengan AI, jadwalkan tayang ke Facebook, Instagram, atau Threads yang sudah terhubung, lalu ajukan iklan atau kolaborasi ke tim Satu Alur.',
       post: { caption: 'Servis AC sebelum musim hujan — slot minggu ini masih ada.', meta: 'Instagram · dijadwalkan' },
     },
   ],
@@ -238,7 +238,7 @@ export const GROWTH = {
       tools: ['Kalkulator', 'Data bisnis', 'Format Rupiah'],
     },
   ],
-  note: 'Media Sosial memerlukan Halaman Facebook dan akun Instagram Bisnis yang Anda hubungkan sendiri.',
+  note: 'Hubungkan platform yang ingin dipakai: Halaman Facebook, Instagram Bisnis yang tertaut ke Halaman Facebook, atau akun Threads.',
 }
 
 export const ROADMAP = [
